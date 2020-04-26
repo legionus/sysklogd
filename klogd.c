@@ -969,10 +969,14 @@ static void LogProcLine(void)
 	memset(log_buffer, '\0', sizeof(log_buffer));
 	if ( (rdcnt = read(kmsg, log_buffer, sizeof(log_buffer)-1)) < 0 )
 	{
+		int saved_errno = errno;
+
 		if ( errno == EINTR )
 			return;
 		Syslog(LOG_ERR, "Cannot read proc file system: %d - %s.", \
 		       errno, strerror(errno));
+		if ( saved_errno == EPERM )
+			Terminate();
 	}
 	else
 		LogLine(log_buffer, rdcnt);
