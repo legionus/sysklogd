@@ -555,6 +555,10 @@ static char sccsid[] = "@(#)syslogd.c	5.27 (Berkeley) 10/10/88";
 #include <arpa/nameser.h>
 #include <arpa/inet.h>
 #include <resolv.h>
+
+#include <pwd.h>
+#include <grp.h>
+
 #ifndef TESTING
 #include "pidfile.h"
 #endif
@@ -816,6 +820,7 @@ int	NoHops = 1;		/* Can we bounce syslog messages through an
 				   intermediate host. */
 
 char	*bind_addr = NULL;	/* bind UDP port to this interface only */
+char	*server_user = NULL;	/* user name to run server as */
 
 extern	int errno;
 
@@ -867,6 +872,21 @@ static int set_nonblock_flag(int desc)
 		return flags;
 
 	return fcntl(desc, F_SETFL, flags | O_NONBLOCK);
+}
+
+static int drop_root(void)
+{
+	struct passwd *pw;
+
+	if (!(pw = getpwnam(server_user))) return -1;
+
+	if (!pw->pw_uid) return -1;
+
+	if (initgroups(server_user, pw->pw_gid)) return -1;
+	if (setgid(pw->pw_gid)) return -1;
+	if (setuid(pw->pw_uid)) return -1;
+
+	return 0;
 }
 
 int main(argc, argv)
@@ -925,7 +945,7 @@ int main(argc, argv)
 		funix[i]  = -1;
 	}
 
-	while ((ch = getopt(argc, argv, "46Aa:dhf:i:l:m:np:rs:v")) != EOF)
+	while ((ch = getopt(argc, argv, "46Aa:dhf:i:l:m:np:rs:u:v")) != EOF)
 		switch((char)ch) {
 		case '4':
 			family = PF_INET;
@@ -988,6 +1008,9 @@ int main(argc, argv)
 				break;
 			}
 			StripDomains = crunch_list(optarg);
+			break;
+		case 'u':
+			server_user = optarg;
 			break;
 		case 'v':
 			printf("syslogd %s.%s\n", VERSION, PATCHLEVEL);
@@ -1133,6 +1156,11 @@ int main(argc, argv)
 	if (getpid() != ppid)
 		kill (ppid, SIGTERM);
 #endif
+
+	if (server_user && drop_root()) {
+		dprintf("syslogd: failed to drop root\n");
+		exit(1);
+	}
 
 	/* Main loop begins here. */
 	for (;;) {
@@ -1290,7 +1318,7 @@ int main(argc, argv)
 int usage()
 {
 	fprintf(stderr, "usage: syslogd [-46Adrvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n" \
-		" [-s domainlist] [-f conffile] [-i IP address]\n");
+		" [-s domainlist] [-f conffile] [-i IP address] [-u username]\n");
 	exit(1);
 }
 

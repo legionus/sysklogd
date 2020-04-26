@@ -33,6 +33,9 @@ sysklogd \- Linux system logging utilities.
 .RB [ " \-s "
 .I domainlist
 ]
+.RB [ " \-u"
+.IB username
+]
 .RB [ " \-v " ]
 .SH DESCRIPTION
 .B Sysklogd
@@ -182,6 +185,19 @@ domains.  For example if
 is specified and the host logging resolves to satu.infodrom.north.de
 no domain would be cut, you will have to specify two domains like:
 .BR "\-s north.de:infodrom.north.de" .
+.TP
+.BI "\-u " "username"
+This causes the
+.B syslogd
+daemon to become the named user before starting up logging.
+
+Note that when this option is in use,
+.B syslogd
+will open all log files as root when the daemon is first started;
+however, after a
+.B SIGHUP
+the files will be reopened as the non-privileged user.  You should
+take this into account when deciding the ownership of the log files.
 .TP
 .B "\-v"
 Print version and exit.
