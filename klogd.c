@@ -882,8 +882,7 @@ static void LogLine(char *ptr, int len)
                value  = strtoul(sym_start+1, (char **) 0, 16);
                *(line-1) = '>';  /* put back delim */
 
-               symbol = LookupSymbol(value, &sym);
-               if ( !symbol_lookup || symbol == (char *) 0 )
+               if ( !symbol_lookup || (symbol = LookupSymbol(value, &sym)) == (char *)0 )
                {
                   parse_state = PARSING_TEXT;
                   break;
@@ -1154,8 +1153,11 @@ int main(argc, argv)
 	if ( one_shot )
 	{
 		if (symbol_lookup) {
-			InitKsyms(symfile);
-			InitMsyms();
+			symbol_lookup  = (InitKsyms(symfile) == 1);
+			symbol_lookup |= InitMsyms();
+			if (symbol_lookup == 0) {
+				Syslog(LOG_WARNING, "cannot find any symbols, turning off symbol lookups\n");
+			}
 		}
 		if ( (logsrc = GetKernelLogSrc()) == kernel )
 			LogKernelLine();
@@ -1170,8 +1172,11 @@ int main(argc, argv)
 #endif
 	logsrc = GetKernelLogSrc();
 	if (symbol_lookup) {
-		InitKsyms(symfile);
-		InitMsyms();
+		symbol_lookup  = (InitKsyms(symfile) == 1);
+		symbol_lookup |= InitMsyms();
+		if (symbol_lookup == 0) {
+			Syslog(LOG_WARNING, "cannot find any symbols, turning off symbol lookups\n");
+		}
 	}
 
 #ifndef TESTING
