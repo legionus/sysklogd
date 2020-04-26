@@ -16,6 +16,9 @@ sysklogd \- Linux system logging utilities.
 .I config file
 ]
 .RB [ " \-h " ] 
+.RB [ " \-i "
+.I IP address
+]
 .RB [ " \-l "
 .I hostlist
 ]
@@ -121,6 +124,13 @@ forward any remote messages it receives to forwarding hosts which have been
 defined.
 This can cause syslog loops that fill up hard disks quite fast and
 thus needs to be used with caution.
+.TP
+.BI "\-i " "IP address"
+If
+.B syslogd
+is configured to accept log input from a UDP port, specify an IP address
+to bind to, rather than the default of INADDR_ANY.  The address must be in
+dotted quad notation, DNS host names are not allowed.
 .TP
 .BI "\-l " "hostlist"
 Specify a hostname that should be logged only with its simple hostname

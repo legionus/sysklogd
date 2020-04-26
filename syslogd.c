@@ -815,6 +815,8 @@ char	**LocalHosts = NULL;	/* these hosts are logged with their hostname */
 int	NoHops = 1;		/* Can we bounce syslog messages through an
 				   intermediate host. */
 
+char	*bind_addr = NULL;	/* bind UDP port to this interface only */
+
 extern	int errno;
 
 /* Function prototypes. */
@@ -923,7 +925,7 @@ int main(argc, argv)
 		funix[i]  = -1;
 	}
 
-	while ((ch = getopt(argc, argv, "46Aa:dhf:l:m:np:rs:v")) != EOF)
+	while ((ch = getopt(argc, argv, "46Aa:dhf:i:l:m:np:rs:v")) != EOF)
 		switch((char)ch) {
 		case '4':
 			family = PF_INET;
@@ -951,9 +953,17 @@ int main(argc, argv)
 		case 'h':
 			NoHops = 0;
 			break;
+		case 'i':
+			if (bind_addr) {
+				fprintf(stderr, "Only one -i argument allowed, "
+					"the first one is taken.\n");
+				break;
+			}
+			bind_addr = optarg;
+			break;
 		case 'l':
 			if (LocalHosts) {
-				fprintf (stderr, "Only one -l argument allowed," \
+				fprintf(stderr, "Only one -l argument allowed, "
 					"the first one is taken.\n");
 				break;
 			}
@@ -1280,7 +1290,7 @@ int main(argc, argv)
 int usage()
 {
 	fprintf(stderr, "usage: syslogd [-46Adrvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n" \
-		" [-s domainlist] [-f conffile]\n");
+		" [-s domainlist] [-f conffile] [-i IP address]\n");
 	exit(1);
 }
 
@@ -1327,9 +1337,10 @@ static int *create_inet_sockets()
 	hints.ai_flags = AI_PASSIVE;
 	hints.ai_family = family;
 	hints.ai_socktype = SOCK_DGRAM;
-	error = getaddrinfo(NULL, "syslog", &hints, &res);
+
+	error = getaddrinfo(bind_addr, "syslog", &hints, &res);
 	if (error) {
-		logerror("network logging disabled (syslog/udp service unknown).");
+		logerror("network logging disabled (syslog/udp service unknown or address incompatible).");
 		logerror("see syslogd(8) for details of whether and how to enable it.");
 		logerror(gai_strerror(error));
 		return NULL;
