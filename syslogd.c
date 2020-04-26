@@ -2915,7 +2915,7 @@ void cfline(line, f)
 			f->f_type = F_PIPE;
 		} else {
 			f->f_file = open(p, O_WRONLY|O_APPEND|O_CREAT|O_NONBLOCK|O_NOCTTY,
-					 0644);
+					 0600);
 			f->f_type = F_FILE;
 		}
 
