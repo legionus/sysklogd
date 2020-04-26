@@ -31,6 +31,8 @@
 #include <syslog.h>
 #include <string.h>
 
+#undef syslog
+#undef vsyslog
 
 /* Function prototypes. */
 extern int InitKsyms(char *);
