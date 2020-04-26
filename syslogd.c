@@ -559,6 +559,7 @@ static char sccsid[] = "@(#)syslogd.c	5.27 (Berkeley) 10/10/88";
 #include "pidfile.h"
 #endif
 #include "version.h"
+#include "attribute.h"
 
 #if defined(__linux__)
 #include <paths.h>
@@ -840,7 +841,8 @@ int decode(char *name, struct code *codetab);
 #if defined(__GLIBC__)
 #define dprintf mydprintf
 #endif /* __GLIBC__ */
-static void dprintf(char *, ...);
+static void dprintf(char *, ...)
+	SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 static void allocate_log(void);
 void sighup_handler();
 
@@ -1881,8 +1883,8 @@ void fprintlog(f, from, flags, msg)
 		else {
 			dprintf(" %s\n", f->f_un.f_forw.f_hname);
 			dprintf("Forwarding suspension not over, time " \
-				"left: %d.\n", INET_SUSPEND_TIME - \
-				fwd_suspend);
+				"left: %ld.\n",
+				(long)(INET_SUSPEND_TIME - fwd_suspend));
 		}
 		break;
 		
@@ -1922,7 +1924,7 @@ void fprintlog(f, from, flags, msg)
 		}
 		else
 			dprintf("Forwarding suspension not over, time " \
-				"left: %d\n", INET_SUSPEND_TIME - fwd_suspend);
+				"left: %ld\n", (long)(INET_SUSPEND_TIME - fwd_suspend));
 		break;
 
 	case F_FORW:
@@ -2214,7 +2216,7 @@ const char *cvthname(struct sockaddr_storage *f, int len)
 
 	if ((error = getnameinfo((struct sockaddr *) f, len,
 				 hname, NI_MAXHOST, NULL, 0, NI_NAMEREQD))) {
-		dprintf("Host name for your address (%s) unknown: %s\n", gai_strerror(error));
+		dprintf("Host name for your address (%s) unknown: %s\n", hname, gai_strerror(error));
 		if ((error = getnameinfo((struct sockaddr *) f, len,
 					 hname, NI_MAXHOST, NULL, 0, NI_NUMERICHOST))) {
 			dprintf("Malformed from address: %s\n", gai_strerror(error));

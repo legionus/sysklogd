@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <syslog.h>
 #include <string.h>
+#include "attribute.h"
 
 #undef syslog
 #undef vsyslog
@@ -39,4 +40,5 @@ extern int InitKsyms(char *);
 extern int InitMsyms(void);
 extern char * ExpandKadds(char *, char *);
 extern void SetParanoiaLevel(int);
-extern void Syslog(int priority, char *fmt, ...);
+extern void Syslog(int priority, char *fmt, ...)
+	SYSKLOGD_FORMAT((__printf__, 2, 3)) SYSKLOGD_NONNULL((2));
