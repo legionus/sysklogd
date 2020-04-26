@@ -89,10 +89,7 @@ syslog(int pri, const char *fmt, ...)
 }
 
 void
-vsyslog(pri, fmt, ap)
-	int pri;
-	const char *fmt;
-	va_list ap;
+__vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
 {
 	register int cnt;
 	register char *p;
@@ -191,6 +188,22 @@ vsyslog(pri, fmt, ap)
 	p = index(tbuf, '>') + 1;
 	(void)write(fd, p, cnt - (p - tbuf));
 	(void)close(fd);
+}
+
+void
+__syslog_chk(int pri, int flag, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	__vsyslog_chk(pri, flag, fmt, ap);
+	va_end(ap);
+}
+
+void
+vsyslog(int pri, const char *fmt, va_list ap)
+{
+	__vsyslog_chk (pri, -1, fmt, ap);
 }
 
 #ifndef TESTING
