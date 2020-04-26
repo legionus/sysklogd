@@ -614,6 +614,10 @@ static char sccsid[] = "@(#)syslogd.c	5.27 (Berkeley) 10/10/88";
 #define _PATH_LOG	"/dev/log"
 #endif
 
+#ifndef _PATH_DEVNULL
+#define _PATH_DEVNULL	"/dev/null"
+#endif
+
 char	*ConfFile = _PATH_LOGCONF;
 char	*PidFile = _PATH_LOGPID;
 char	ctty[] = _PATH_CONSOLE;
@@ -981,8 +985,22 @@ int main(argc, argv)
 		dprintf("Checking pidfile.\n");
 		if (!check_pid(PidFile))
 		{
+			pid_t pid;
+
+			if ((fd = open(_PATH_DEVNULL, O_RDWR)) < 0)
+			{
+				fprintf (stderr, "syslogd: %s: %s\n",
+				         _PATH_DEVNULL, strerror(errno));
+				exit(1);
+			}
+
 			signal (SIGTERM, doexit);
-			if (fork()) {
+			if ((pid = fork()) == -1)
+			{
+				fputs("syslogd: fork failed.\n", stderr);
+				exit(1);
+			} else if (pid)
+			{
 				/*
 				 * Parent process
 				 */
@@ -999,7 +1017,12 @@ int main(argc, argv)
 			}
 			signal (SIGTERM, SIG_DFL);
 			num_fds = getdtablesize();
-			for (i= 0; i < num_fds; i++)
+			if (dup2(fd, 0) != 0 || dup2(fd, 1) != 1 || dup2(fd, 2) != 2)
+			{
+				fputs("syslogd: dup2 failed.\n", stderr);
+				exit(1);
+			}
+			for (i= 3; i < num_fds; i++)
 				(void) close(i);
 			untty();
 		}

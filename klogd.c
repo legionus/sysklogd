@@ -285,6 +285,10 @@ _syscall3(int,ksyslog,int, type, char *, buf, int, len);
 #define ksyslog klogctl
 #endif
 
+#ifndef _PATH_DEVNULL
+#define _PATH_DEVNULL	"/dev/null"
+#endif
+
 #define LOG_BUFFER_SIZE 4096
 #define LOG_LINE_LENGTH 1000
 
@@ -1069,22 +1073,38 @@ int main(argc, argv)
 		if (!check_pid(PidFile))
 		{
 			signal (SIGTERM, doexit);
-			if ( fork() == 0 )
+			pid_t pid;
+			int fl;
+
+			if ( (fl = open(_PATH_DEVNULL, O_RDWR)) < 0 )
 			{
-				auto int fl;
+				fprintf(stderr, "klogd: %s: %s\n",
+				         _PATH_DEVNULL, strerror(errno));
+				exit(1);
+			}
+
+			if ( (pid = fork()) == -1 )
+			{
+				fputs("klogd: fork failed.\n", stderr);
+				exit(1);
+			} else if ( pid == 0 )
+			{
 				int num_fds = getdtablesize();
 
 				signal (SIGTERM, SIG_DFL);
-		
+
 				/* This is the child closing its file descriptors. */
-				for (fl= 0; fl <= num_fds; ++fl)
+				if ( dup2(fl, 0) != 0 ||
+				     ((!use_output || strcmp(output, "-")) &&
+				      dup2(fl, 1) != 1) ||
+				     dup2(fl, 2) != 2)
 				{
-					if ( fileno(stdout) == fl && use_output )
-						if ( strcmp(output, "-") == 0 )
-							continue;
-					close(fl);
+					fputs("klogd: dup2 failed.\n", stderr);
+					exit(1);
 				}
- 
+				for (fl= 3; fl <= num_fds; ++fl)
+					close(fl);
+
 				setsid();
 			}
 			else
