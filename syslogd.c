@@ -2417,7 +2417,7 @@ void die(sig)
 void doexit(sig)
 	int sig;
 {
-	exit (0);
+	_exit(0);
 }
 #endif
 
