@@ -703,8 +703,8 @@ struct filed {
  * in seconds after previous message is logged.  After each flush,
  * we move to the next interval until we reach the largest.
  */
-int	repeatinterval[] = { 30, 60 };	/* # of secs before flush */
-#define	MAXREPEAT ((sizeof(repeatinterval) / sizeof(repeatinterval[0])) - 1)
+time_t	repeatinterval[] = { 30, 60 };	/* # of secs before flush */
+#define	MAXREPEAT ((int) ((sizeof(repeatinterval) / sizeof(repeatinterval[0])) - 1))
 #define	REPEATTIME(f)	((f)->f_time + repeatinterval[(f)->f_repeatcount])
 #define	BACKOFF(f)	{ if (++(f)->f_repeatcount > MAXREPEAT) \
 				 (f)->f_repeatcount = MAXREPEAT; \
@@ -817,13 +817,13 @@ int main(int argc, char **argv);
 char **crunch_list(char *list);
 int usage(void);
 void untty(void);
-void printchopped(const char *hname, char *msg, int len, int fd);
+void printchopped(const char *hname, char *msg, size_t len, int fd);
 void printline(const char *hname, char *msg);
 void printsys(char *msg);
 void logmsg(int pri, char *msg, const char *from, int flags);
 void fprintlog(register struct filed *f, char *from, int flags, char *msg);
 void endtty();
-void wallmsg(register struct filed *f, struct iovec *iov);
+void wallmsg(register struct filed *f, struct iovec *iov, size_t iovsz);
 void reapchild();
 const char *cvtaddr(struct sockaddr_storage *f, int len);
 const char *cvthname(struct sockaddr_storage *f, int len);
@@ -897,7 +897,10 @@ int main(argc, argv)
 	int maxfds;
 
 #ifndef TESTING
-	chdir ("/");
+	if (chdir ("/") < 0) {
+		fprintf(stderr, "syslogd: chdir to / failed: %m");
+		exit(1);
+	}
 #endif
 	for (i = 1; i < MAXFUNIX; i++) {
 		funixn[i] = "";
@@ -1454,7 +1457,7 @@ void untty()
 void printchopped(hname, msg, len, fd)
 	const char *hname;
 	char *msg;
-	int len;
+	size_t len;
 	int fd;
 {
 	auto int ptlngth;
@@ -1464,7 +1467,7 @@ void printchopped(hname, msg, len, fd)
 	          *end,
 		  tmpline[MAXLINE + 1];
 
-	dprintf("Message length: %d, File descriptor: %d.\n", len, fd);
+	dprintf("Message length: %lu, File descriptor: %d.\n", (unsigned long)len, fd);
 	tmpline[0] = '\0';
 	if ( parts[fd] != (char *) 0 )
 	{
@@ -1746,9 +1749,9 @@ void logmsg(pri, msg, from, flags)
 		    !strcmp(from, f->f_prevhost)) {
 			(void) strncpy(f->f_lasttime, timestamp, 15);
 			f->f_prevcount++;
-			dprintf("msg repeated %d times, %ld sec of %d.\n",
+			dprintf("msg repeated %d times, %ld sec of %ld.\n",
 			    f->f_prevcount, now - f->f_time,
-			    repeatinterval[f->f_repeatcount]);
+			    (long) repeatinterval[f->f_repeatcount]);
 
 			if (f->f_prevcount == 1 && DupesPending++ == 0) {
 				int seconds;
@@ -2043,7 +2046,7 @@ void fprintlog(f, from, flags, msg)
 		dprintf("\n");
 		v->iov_base = "\r\n";
 		v->iov_len = 2;
-		wallmsg(f, iov);
+		wallmsg(f, iov, 6);
 		break;
 	} /* switch */
 	if (f->f_type != F_FORW_UNKN)
@@ -2068,9 +2071,10 @@ void endtty()
  *	world, or a list of approved users.
  */
 
-void wallmsg(f, iov)
+void wallmsg(f, iov, iovsz)
 	register struct filed *f;
 	struct iovec *iov;
+	size_t iovsz;
 {
 	char p[sizeof (_PATH_DEV) + UNAMESZ];
 	register int i;
@@ -2150,7 +2154,7 @@ void wallmsg(f, iov)
 
 					if (fstat(ttyf, &statb) == 0 &&
 					    (statb.st_mode & S_IWRITE))
-						(void) writev(ttyf, iov, 6);
+						(void) writev(ttyf, iov, iovsz);
 					close(ttyf);
 					ttyf = -1;
 				}
@@ -2171,7 +2175,7 @@ void reapchild()
 	(void) signal(SIGCHLD, reapchild);	/* reset signal handler -ASP */
 	wait ((int *)0);
 #else
-	union wait status;
+	int status;
 
 	while (wait3(&status, WNOHANG, (struct rusage *) NULL) > 0)
 		;
@@ -2283,9 +2287,9 @@ void domark()
 	for (f = Files; f; f = f->f_next) {
 #endif
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
-			dprintf("flush %s: repeated %d times, %d sec.\n",
+			dprintf("flush %s: repeated %d times, %ld sec.\n",
 				TypeNames[f->f_type], f->f_prevcount,
-				repeatinterval[f->f_repeatcount]);
+				(long) repeatinterval[f->f_repeatcount]);
 			fprintlog(f, LocalHostName, 0, (char *)NULL);
 			BACKOFF(f);
 			DupesPending--;

@@ -987,7 +987,10 @@ int main(argc, argv)
 
 #ifndef TESTING
 	pid_t ppid = getpid();
-	chdir ("/");
+	if (chdir ("/") < 0) {
+		fprintf(stderr, "klogd: chdir to / failed: %m");
+		exit(1);
+	}
 #endif
 	/* Parse the command-line. */
 	while ((ch = getopt(argc, argv, "c:df:iIk:nopsvx2")) != EOF)
