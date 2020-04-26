@@ -268,6 +268,8 @@
 #include <stdarg.h>
 #include <paths.h>
 #include <stdlib.h>
+#include <pwd.h>
+#include <grp.h>
 #include "klogd.h"
 #include "ksyms.h"
 #ifndef TESTING
@@ -322,6 +324,9 @@ static enum LOGSRC {none, proc, kernel} logsrc;
 int debugging = 0;
 int symbols_twice = 0;
 
+char *server_user = NULL;
+char *chroot_dir = NULL;
+int log_flags = 0;
 
 /* Function prototypes. */
 extern int ksyslog(int type, char *buf, int len);
@@ -551,8 +556,9 @@ static enum LOGSRC GetKernelLogSrc(void)
 	 * First do a stat to determine whether or not the proc based
 	 * file system is available to get kernel messages from.
 	 */
-	if ( use_syscall ||
-	    ((stat(_PATH_KLOG, &sb) < 0) && (errno == ENOENT)) )
+	if (!server_user &&
+	    (use_syscall ||
+	    ((stat(_PATH_KLOG, &sb) < 0) && (errno == ENOENT))))
 	{
 	  	/* Initialize kernel logging. */
 	  	ksyslog(1, NULL, 0);
@@ -975,6 +981,27 @@ static void LogProcLine(void)
 }
 
 
+static int drop_root(void)
+{
+	struct passwd *pw;
+
+	if (!(pw = getpwnam(server_user))) return -1;
+
+	if (!pw->pw_uid) return -1;
+
+	if (chroot_dir) {
+		if (chdir(chroot_dir)) return -1;
+		if (chroot(".")) return -1;
+	}
+
+	if (setgroups(0, NULL)) return -1;
+	if (setgid(pw->pw_gid)) return -1;
+	if (setuid(pw->pw_uid)) return -1;
+
+	return 0;
+}
+
+
 int main(argc, argv)
 
 	int argc;
@@ -996,7 +1023,7 @@ int main(argc, argv)
 	}
 #endif
 	/* Parse the command-line. */
-	while ((ch = getopt(argc, argv, "c:df:iIk:nopsvx2")) != EOF)
+	while ((ch = getopt(argc, argv, "c:df:u:j:iIk:nopsvx2")) != EOF)
 		switch((char)ch)
 		{
 		    case '2':		/* Print lines with symbols twice. */
@@ -1018,6 +1045,10 @@ int main(argc, argv)
 		    case 'I':
 			SignalDaemon(SIGUSR2);
 			return(0);
+		    case 'j':		/* chroot 'j'ail */
+			chroot_dir = optarg;
+			log_flags |= LOG_NDELAY;
+			break;
 		    case 'k':		/* Kernel symbol file. */
 			symfile = optarg;
 			break;
@@ -1033,6 +1064,9 @@ int main(argc, argv)
 		    case 's':		/* Use syscall interface. */
 			use_syscall = 1;
 			break;
+		    case 'u':		/* Run as this user */
+			server_user = optarg;
+			break;
 		    case 'v':
 			printf("klogd %s.%s\n", VERSION, PATCHLEVEL);
 			exit (1);
@@ -1041,6 +1075,10 @@ int main(argc, argv)
 			break;
 		}
 
+	if (chroot_dir && !server_user) {
+		fputs("'-j' is only valid with '-u'\n", stderr);
+		exit(1);
+	}
 
 	/* Set console logging level. */
 	if ( log_level != (char *) 0 )
@@ -1166,7 +1204,7 @@ int main(argc, argv)
 		}
 	}
 	else
-		openlog("kernel", 0, LOG_KERN);
+		openlog("kernel", log_flags, LOG_KERN);
 
 
 	/* Handle one-shot logging. */
@@ -1203,6 +1241,11 @@ int main(argc, argv)
 	if (getpid() != ppid)
 		kill (ppid, SIGTERM);
 #endif
+
+	if (server_user && drop_root()) {
+		syslog(LOG_ALERT, "klogd: failed to drop root");
+		Terminate();
+	}
 
         /* The main loop. */
 	while (1)

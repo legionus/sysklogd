@@ -1,5 +1,6 @@
 .\" Copyright 1994-6 Dr. Greg Wettstein, Enjellic Systems Development.
 .\" Copyright 1997-2007 Martin Schulze <joey@infodrom.org>
+.\" Thu Feb 17 2000: Chris Wing: Unprivileged klogd feature
 .\" May be distributed under the GNU General Public License
 .\"
 .TH KLOGD 8 "27 May 2007" "Version 1.5" "Linux System Administration"
@@ -13,6 +14,12 @@ klogd \- Kernel Log Daemon
 .RB [ " \-d " ]
 .RB [ " \-f "
 .I fname
+]
+.RB [ " \-u "
+.I username
+]
+.RB [ " \-j "
+.I chroot_dir
 ]
 .RB [ " \-iI " ]
 .RB [ " \-n " ]
@@ -40,6 +47,20 @@ stderr.
 .TP
 .BI "\-f " file
 Log messages to the specified filename rather than to the syslog facility.
+.TP
+.BI "\-u " username
+Tells klogd to become the specified user and drop root privileges before
+starting logging.
+.TP
+.BI "\-j " chroot_dir
+Tells klogd to
+.BR chroot (2)
+into this directory after initializing.
+This option is only valid if the \-u option is also used to run klogd
+without root privileges.
+Note that the use of this option will prevent \-i and \-I from working
+unless you set up the chroot directory in such a way that klogd can still
+read the kernel module symbols.
 .TP
 .BI "\-i \-I"
 Signal the currently executing klogd daemon.  Both of these switches control
