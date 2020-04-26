@@ -857,6 +857,16 @@ static int create_unix_socket(const char *path);
 static int *create_inet_sockets();
 #endif
 
+static int set_nonblock_flag(int desc)
+{
+	int flags = fcntl(desc, F_GETFL, 0);
+
+	if ((flags == -1) || (flags & O_NONBLOCK))
+		return flags;
+
+	return fcntl(desc, F_SETFL, flags | O_NONBLOCK);
+}
+
 int main(argc, argv)
 	int argc;
 	char **argv;
@@ -1311,7 +1321,7 @@ static int *create_inet_sockets()
 {
 	struct addrinfo hints, *res, *r;
 	int error, maxs, *s, *socks;
-	int on = 1, sockflags;
+	int on = 1;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags = AI_PASSIVE;
@@ -1360,15 +1370,7 @@ static int *create_inet_sockets()
 		 * will stall until the timeout, and other processes trying to
 		 * log will also stall.
 		 */
-		if ((sockflags = fcntl(*s, F_GETFL)) != -1) {
-			sockflags |= O_NONBLOCK;
-			/*
-			 * SETFL could fail too, so get it caught by the subsequent
-			 * error check.
-			 */
-			sockflags = fcntl(*s, F_SETFL, sockflags);
-		}
-		if (sockflags == -1) {
+		if (set_nonblock_flag(*s) == -1) {
 			logerror("fcntl(O_NONBLOCK), suspending inet");
 			close(*s);
 			continue;
@@ -2028,7 +2030,7 @@ void fprintlog(f, from, flags, msg)
 			int e = errno;
 
 			/* If a named pipe is full, just ignore it for now */
-			if (f->f_type == F_PIPE && e == EAGAIN)
+			if ((f->f_type == F_PIPE || f->f_type == F_TTY) && e == EAGAIN)
 				break;
 
 			/* If the filesystem is filled up, just ignore
@@ -2056,6 +2058,8 @@ void fprintlog(f, from, flags, msg)
 					untty();
 					goto again;
 				}
+				if (f->f_type == F_TTY)
+					(void) set_nonblock_flag(f->f_file);
 			} else {
 				f->f_type = F_UNUSED;
 				errno = e;
@@ -2076,7 +2080,7 @@ void fprintlog(f, from, flags, msg)
 	} /* switch */
 	if (f->f_type != F_FORW_UNKN)
 		f->f_prevcount = 0;
-	return;		
+	return;
 }
 #if FALSE
 }} /* balance parentheses for emacs */
@@ -2914,14 +2918,15 @@ void cfline(line, f)
 					 0644);
 			f->f_type = F_FILE;
 		}
-		        
-	  	if ( f->f_file < 0 ){
+
+		if ( f->f_file < 0 ){
 			f->f_file = -1;
 			dprintf("Error opening log file: %s\n", p);
 			logerror(p);
 			break;
 		}
 		if (isatty(f->f_file)) {
+			(void) set_nonblock_flag(f->f_file);
 			f->f_type = F_TTY;
 			untty();
 		}
