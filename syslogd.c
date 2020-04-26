@@ -556,6 +556,7 @@ static char sccsid[] = "@(#)syslogd.c	5.27 (Berkeley) 10/10/88";
 #include <arpa/inet.h>
 #include <resolv.h>
 
+#include <dirent.h>
 #include <pwd.h>
 #include <grp.h>
 
@@ -635,7 +636,7 @@ static int restart = 0;
 #define MAXFUNIX	20
 
 int nfunix = 1;
-char *funixn[MAXFUNIX] = { _PATH_LOG };
+const char *funixn[MAXFUNIX] = { _PATH_LOG };
 int funix[MAXFUNIX] = { -1, };
 
 #ifdef UT_NAMESIZE
@@ -895,6 +896,74 @@ static int drop_root(void)
 	return 0;
 }
 
+static void add_funix_name(const char *fname)
+{
+	unsigned i;
+
+	for (i = 0; i < MAXFUNIX; ++i)
+		if (!strcmp(fname, funixn[i]))
+			return;
+
+	if (nfunix < MAXFUNIX)
+		funixn[nfunix++] = fname;
+	else
+		fprintf(stderr, "Out of descriptors, ignoring %s\n", fname);
+}
+
+static void add_funix_dir(const char *dname)
+{
+	DIR *dir;
+	struct dirent *entry;
+
+	if (chdir(dname))
+	{
+		fprintf(stderr, "chdir: %s: %s\n", dname, strerror(errno));
+		return;
+	}
+
+	if (!(dir = opendir(".")))
+	{
+		fprintf(stderr, "opendir: %s: %s\n", dname, strerror(errno));
+		exit(1);
+		return;
+	}
+
+	while ((entry = readdir(dir)))
+	{
+		struct stat st;
+
+		if (strchr(entry->d_name, '.'))
+			continue;
+
+		if (lstat(entry->d_name, &st))
+			continue;
+
+		if (S_ISLNK(st.st_mode))
+		{
+			const char *name;
+			char buf[MAXPATHLEN];
+			int n = readlink(entry->d_name, buf, sizeof(buf));
+
+			if ((n <= 0) || (n >= sizeof(buf)) || (buf[0] != '/'))
+				continue;
+			buf[n] = '\0';
+
+			if ((name = strdup(buf)) == NULL) {
+				printf("Sorry, can't get enough memory, exiting.\n");
+				exit(1);
+			}
+			add_funix_name(name);
+		}
+	}
+
+	if (closedir(dir))
+		fprintf(stderr, "closedir: %s: %s\n", dname, strerror(errno));
+	if (chdir ("/") < 0) {
+		fprintf(stderr, "syslogd: chdir to / failed: %m");
+		exit(1);
+	}
+}
+
 int main(argc, argv)
 	int argc;
 	char **argv;
@@ -939,6 +1008,7 @@ int main(argc, argv)
 	extern int optind;
 	extern char *optarg;
 	int maxfds;
+	const char *funix_dir = "/etc/syslog.d";
 
 #ifndef TESTING
 	if (chdir ("/") < 0) {
@@ -951,7 +1021,7 @@ int main(argc, argv)
 		funix[i]  = -1;
 	}
 
-	while ((ch = getopt(argc, argv, "46Aa:dhf:i:j:l:m:np:rs:u:v")) != EOF)
+	while ((ch = getopt(argc, argv, "46Aa:dhf:i:j:l:m:np:P:rs:u:v")) != EOF)
 		switch((char)ch) {
 		case '4':
 			family = PF_INET;
@@ -965,10 +1035,7 @@ int main(argc, argv)
 			send_to_all++;
 			break;
 		case 'a':
-			if (nfunix < MAXFUNIX)
-				funixn[nfunix++] = optarg;
-			else
-				fprintf(stderr, "Out of descriptors, ignoring %s\n", optarg);
+			add_funix_name(optarg);
 			break;
 		case 'd':		/* debug */
 			Debug = 1;
@@ -1007,6 +1074,9 @@ int main(argc, argv)
 		case 'p':		/* path to regular log socket */
 			funixn[0] = optarg;
 			break;
+		case 'P':
+			funix_dir = optarg;
+			break;
 		case 'r':		/* accept remote messages */
 			AcceptRemote = 1;
 			break;
@@ -1035,6 +1105,8 @@ int main(argc, argv)
 		fputs("'-j' is only valid with '-u'\n", stderr);
 		exit(1);
 	}
+	if (funix_dir && *funix_dir)
+		add_funix_dir(funix_dir);
 #ifndef TESTING
 	if ( !(Debug || NoFork) )
 	{
