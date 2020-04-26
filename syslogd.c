@@ -821,6 +821,7 @@ int	NoHops = 1;		/* Can we bounce syslog messages through an
 
 char	*bind_addr = NULL;	/* bind UDP port to this interface only */
 char	*server_user = NULL;	/* user name to run server as */
+char	*chroot_dir = NULL;	/* user name to run server as */
 
 extern	int errno;
 
@@ -881,6 +882,11 @@ static int drop_root(void)
 	if (!(pw = getpwnam(server_user))) return -1;
 
 	if (!pw->pw_uid) return -1;
+
+	if (chroot_dir) {
+		if (chdir(chroot_dir)) return -1;
+		if (chroot(".")) return -1;
+	}
 
 	if (initgroups(server_user, pw->pw_gid)) return -1;
 	if (setgid(pw->pw_gid)) return -1;
@@ -945,7 +951,7 @@ int main(argc, argv)
 		funix[i]  = -1;
 	}
 
-	while ((ch = getopt(argc, argv, "46Aa:dhf:i:l:m:np:rs:u:v")) != EOF)
+	while ((ch = getopt(argc, argv, "46Aa:dhf:i:j:l:m:np:rs:u:v")) != EOF)
 		switch((char)ch) {
 		case '4':
 			family = PF_INET;
@@ -980,6 +986,9 @@ int main(argc, argv)
 				break;
 			}
 			bind_addr = optarg;
+			break;
+		case 'j':
+			chroot_dir = optarg;
 			break;
 		case 'l':
 			if (LocalHosts) {
@@ -1022,6 +1031,10 @@ int main(argc, argv)
 	if ((argc -= optind))
 		usage();
 
+	if (chroot_dir && !server_user) {
+		fputs("'-j' is only valid with '-u'\n", stderr);
+		exit(1);
+	}
 #ifndef TESTING
 	if ( !(Debug || NoFork) )
 	{

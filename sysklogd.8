@@ -36,6 +36,9 @@ sysklogd \- Linux system logging utilities.
 .RB [ " \-u"
 .IB username
 ]
+.RB [ " \-j "
+.I chroot_dir
+]
 .RB [ " \-v " ]
 .SH DESCRIPTION
 .B Sysklogd
@@ -198,6 +201,19 @@ however, after a
 .B SIGHUP
 the files will be reopened as the non-privileged user.  You should
 take this into account when deciding the ownership of the log files.
+.TP
+.BI "\-j " chroot_dir
+Tells
+.B syslogd
+daemon to
+.BR chroot (2)
+into this directory after initializing.
+This option is only valid if the \-u option is also used to run
+.B syslogd
+without root privileges.
+Note that the use of this option will prevent
+.B SIGHUP
+from working which makes daemon reload practically impossible.
 .TP
 .B "\-v"
 Print version and exit.
