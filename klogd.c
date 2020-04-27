@@ -312,13 +312,8 @@ static enum LOGSRC GetKernelLogSrc(void)
 	{
 	  	/* Initialize kernel logging. */
 	  	ksyslog(1, NULL, 0);
-#ifdef DEBRELEASE
-		Syslog(LOG_INFO, "klogd %s.%s#%s, log source = ksyslog "
-		       "started.", VERSION, PATCHLEVEL, DEBRELEASE);
-#else
 		Syslog(LOG_INFO, "klogd %s.%s, log source = ksyslog "
 		       "started.", VERSION, PATCHLEVEL);
-#endif
 		return(kernel);
 	}
 
@@ -329,14 +324,8 @@ static enum LOGSRC GetKernelLogSrc(void)
 		ksyslog(7, NULL, 0);
 		exit(1);
 	}
-
-#ifdef DEBRELEASE
-	Syslog(LOG_INFO, "klogd %s.%s#%s, log source = %s started.", \
-	       VERSION, PATCHLEVEL, DEBRELEASE, _PATH_KLOG);
-#else
 	Syslog(LOG_INFO, "klogd %s.%s, log source = %s started.", \
 	       VERSION, PATCHLEVEL, _PATH_KLOG);
-#endif
 	return(proc);
 }
 

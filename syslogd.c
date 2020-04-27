@@ -2139,23 +2139,12 @@ void init()
 	}
 
 	if ( AcceptRemote )
-#ifdef DEBRELEASE
-		logmsg(LOG_SYSLOG|LOG_INFO, "syslogd " VERSION "." PATCHLEVEL "#" DEBRELEASE \
-		       ": restart (remote reception)." , LocalHostName, \
-		       	ADDDATE);
-#else
 		logmsg(LOG_SYSLOG|LOG_INFO, "syslogd " VERSION "." PATCHLEVEL \
-		       ": restart (remote reception)." , LocalHostName, \
-		       	ADDDATE);
-#endif
+		       ": restart (remote reception)." , LocalHostName, ADDDATE);
 	else
-#ifdef DEBRELEASE
-		logmsg(LOG_SYSLOG|LOG_INFO, "syslogd " VERSION "." PATCHLEVEL "#" DEBRELEASE \
-		       ": restart." , LocalHostName, ADDDATE);
-#else
 		logmsg(LOG_SYSLOG|LOG_INFO, "syslogd " VERSION "." PATCHLEVEL \
 		       ": restart." , LocalHostName, ADDDATE);
-#endif
+
 	(void) signal(SIGHUP, sighup_handler);
 	verbosef("syslogd: restarted.\n");
 }
