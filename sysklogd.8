@@ -11,6 +11,7 @@ sysklogd \- Linux system logging utilities.
 .RB [ " \-a "
 .I socket
 ]
+.RB [ " \-c " ]
 .RB [ " \-d " ]
 .RB [ " \-f "
 .I config file
@@ -113,6 +114,11 @@ the symbol
 within the syslogd.c source file.  An example for a chroot() daemon is
 described by the people from OpenBSD at
 <http://www.guides.sk/psionic/dns/>.
+.TP
+.B "\-c"
+Disable the repeating line compression that normally suppresses the
+repeated lines and logs a message such as 'last message repeated 124
+times'.  With this option, all repeated lines will be logged.
 .TP
 .B "\-d"
 Turns on debug mode.  Using this the daemon will not proceed a 

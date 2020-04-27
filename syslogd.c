@@ -797,6 +797,7 @@ struct code	FacNames[] = {
 };
 
 int	Debug;			/* debug flag */
+int	Compress = 1;		/* compress repeated messages flag */
 char	LocalHostName[MAXHOSTNAMELEN+1];	/* our hostname */
 char	*LocalDomain;		/* our local domain name */
 char	*emptystring = "";
@@ -1021,7 +1022,7 @@ int main(argc, argv)
 		funix[i]  = -1;
 	}
 
-	while ((ch = getopt(argc, argv, "46Aa:dhf:i:j:l:m:np:P:rs:u:v")) != EOF)
+	while ((ch = getopt(argc, argv, "46Aa:cdhf:i:j:l:m:np:P:rs:u:v")) != EOF)
 		switch((char)ch) {
 		case '4':
 			family = PF_INET;
@@ -1036,6 +1037,9 @@ int main(argc, argv)
 			break;
 		case 'a':
 			add_funix_name(optarg);
+			break;
+		case 'c':		/* don't compress repeated messages */
+			Compress = 0;
 			break;
 		case 'd':		/* debug */
 			Debug = 1;
@@ -1402,7 +1406,7 @@ int main(argc, argv)
 
 int usage()
 {
-	fprintf(stderr, "usage: syslogd [-46Adrvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n" \
+	fprintf(stderr, "usage: syslogd [-46Acdrvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n" \
 		" [-s domainlist] [-f conffile] [-i IP address] [-u username]\n");
 	exit(1);
 }
@@ -1895,7 +1899,7 @@ void logmsg(pri, msg, from, flags)
 		/*
 		 * suppress duplicate lines to this file
 		 */
-		if ((flags & MARK) == 0 && msglen == f->f_prevlen &&
+		if (Compress && (flags & MARK) == 0 && msglen == f->f_prevlen &&
 		    !strcmp(msg, f->f_prevline) &&
 		    !strcmp(from, f->f_prevhost)) {
 			(void) strncpy(f->f_lasttime, timestamp, 15);
