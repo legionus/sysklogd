@@ -19,11 +19,6 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111, USA
 */
 
-/*
- * Sat Aug 19 13:24:33 MET DST 1995: Martin Schulze
- *	First version (v0.2) released
- */
-
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/stat.h>

@@ -17,41 +17,6 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char sccsid[] = "@(#)syslog.c	5.28 (Berkeley) 6/27/90";
-#endif /* LIBC_SCCS and not lint */
-
-/*
- * SYSLOG -- print message on log file
- *
- * This routine looks a lot like printf, except that it outputs to the
- * log file instead of the standard output.  Also:
- *	adds a timestamp,
- *	prints the module name in front of the message,
- *	has some other formatting types (or will sometime),
- *	adds a newline on the end of the message.
- *
- * The output of this routine is intended to be read by syslogd(8).
- *
- * Author: Eric Allman
- * Modified to use UNIX domain IPC by Ralph Campbell
- *
- * Sat Dec 11 11:58:31 CST 1993: Dr. Wettstein
- *	Changes to allow compilation with no complains under -Wall.
- *
- * Thu Jan 18 11:16:11 CST 1996: Dr. Wettstein
- *	Added patch to close potential security hole.  This is the same
- *	patch which was announced in the linux-security mailing lists
- *	and incorporated into the libc version of syslog.c.
- *
- * Sun Mar 11 20:23:44 CET 2001: Martin Schulze <joey@infodrom.ffis.de>
- *	Use SOCK_DGRAM for loggin, renables it to work.	
- *
- * Wed Aug 27 17:48:16 CEST 2003: Martin Schulze <joey@Infodrom.org>
- *	Improved patch by Michael Pomraning <mjp@securepipe.com> to
- *	reconnect klogd to the logger after it went away.
- */
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/file.h>
