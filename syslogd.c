@@ -1500,11 +1500,6 @@ crunch_list(list)
 	}
 	result[++m] = NULL;
 
-#if 0
-	m = 0;
-	while (result[m])
-		verbosef ("#%d: %s\n", m, result[m++]);
-#endif
 	return result;
 }
 
@@ -2093,9 +2088,6 @@ void fprintlog(f, from, flags, msg)
 		f->f_prevcount = 0;
 	return;
 }
-#if FALSE
-}} /* balance parentheses for emacs */
-#endif
 
 jmp_buf ttybuf;
 
@@ -2660,9 +2652,6 @@ void init()
 	(void) signal(SIGHUP, sighup_handler);
 	verbosef("syslogd: restarted.\n");
 }
-#if FALSE
-}}} /* balance parentheses for emacs */
-#endif
 
 /*
  * Crack a configuration file line
