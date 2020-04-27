@@ -519,9 +519,7 @@ static char sccsid[] = "@(#)syslogd.c	5.27 (Berkeley) 10/10/88";
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
-#ifdef SYSV
 #include <sys/types.h>
-#endif
 #include <utmp.h>
 #include <ctype.h>
 #include <string.h>
@@ -538,11 +536,7 @@ static char sccsid[] = "@(#)syslogd.c	5.27 (Berkeley) 10/10/88";
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/file.h>
-#ifdef SYSV
 #include <fcntl.h>
-#else
-#include <sys/msgbuf.h>
-#endif
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <sys/time.h>
@@ -682,9 +676,6 @@ const char *sys_h_errlist[] = {
  */
 
 struct filed {
-#ifndef SYSV
-	struct	filed *f_next;		/* next in linked list */
-#endif
 	short	f_type;			/* entry type, see below */
 	short	f_file;			/* file descriptor */
 	time_t	f_time;			/* time this was last written */
@@ -1167,10 +1158,6 @@ int main(argc, argv)
 	else
 #endif
 		debugging_on = 1;
-#ifndef SYSV
-	else
-		setlinebuf(stdout);
-#endif
 
 #ifndef TESTING
 	/* tuck my process id away */
@@ -1434,9 +1421,6 @@ static int create_unix_socket(const char *path)
 		logerror(line);
 		dprintf("cannot create %s (%d).\n", path, errno);
 		close(fd);
-#ifndef SYSV
-		die(0);
-#endif
 		return -1;
 	}
 	return fd;
@@ -1581,28 +1565,12 @@ crunch_list(list)
 
 
 void untty()
-#ifdef SYSV
 {
 	if ( !Debug ) {
 		setsid();
 	}
 	return;
 }
-
-#else
-{
-	int i;
-
-	if ( !Debug ) {
-		i = open(_PATH_TTY, O_RDWR);
-		if (i >= 0) {
-			(void) ioctl(i, (int) TIOCNOTTY, (char *)0);
-			(void) close(i);
-		}
-	}
-}
-#endif
-
 
 /*
  * Parse the line to make sure that the msg is not a composite of more
@@ -1811,26 +1779,14 @@ void logmsg(pri, msg, from, flags)
 	int fac, prilev, lognum;
 	int msglen;
 	char *timestamp;
-#ifdef __gnu_linux__
 	sigset_t mask;
-#else
-#ifndef SYSV
-	sigset_t omask;
-#endif
-#endif
 
 	dprintf("logmsg: %s, flags %x, from %s, msg %s\n", textpri(pri), flags, from, msg);
 
-#ifdef __gnu_linux__
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGHUP);
 	sigaddset(&mask, SIGALRM);
 	sigprocmask(SIG_BLOCK, &mask, NULL);
-#else
-#ifndef SYSV
-	omask = sigblock(sigmask(SIGHUP)|sigmask(SIGALRM));
-#endif
-#endif
 
 	/*
 	 * Check to see if msg looks non-standard.
@@ -1868,21 +1824,12 @@ void logmsg(pri, msg, from, flags)
 			(void) close(f->f_file);
 			f->f_file = -1;
 		}
-#ifdef __gnu_linux__
 		sigprocmask(SIG_UNBLOCK, &mask, NULL);
-#else
-#ifndef SYSV
-		(void) sigsetmask(omask);
-#endif
-#endif
 		return;
 	}
-#ifdef SYSV
+
 	for (lognum = 0; lognum <= nlogs; lognum++) {
 		f = &Files[lognum];
-#else
-	for (f = Files; f; f = f->f_next) {
-#endif
 
 		/* skip messages that are incorrect priority */
 		if ( (f->f_pmask[fac] == TABLE_NOPRI) || \
@@ -1959,17 +1906,8 @@ void logmsg(pri, msg, from, flags)
 			}
 		}
 	}
-#ifdef __gnu_linux__
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
-#else
-#ifndef SYSV
-	(void) sigsetmask(omask);
-#endif
-#endif
 }
-#if FALSE
-} /* balance parentheses for emacs */
-#endif
 
 void fprintlog(f, from, flags, msg)
 	register struct filed *f;
@@ -2257,10 +2195,7 @@ void wallmsg(f, iov, iovsz)
 	if (fork() == 0) {
 		(void) signal(SIGTERM, SIG_DFL);
 		(void) alarm(0);
-#ifndef SYSV
-		(void) signal(SIGTTOU, SIG_IGN);
-		(void) sigsetmask(0);
-#endif
+
 		(void) snprintf(greetings, sizeof(greetings),
 		    "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
 			(char *) iov[2].iov_base, ctime(&now));
@@ -2328,18 +2263,11 @@ void wallmsg(f, iov, iovsz)
 void reapchild()
 {
 	int saved_errno = errno;
-#if defined(SYSV) && !defined(linux)
-	(void) signal(SIGCHLD, reapchild);	/* reset signal handler -ASP */
-	wait ((int *)0);
-#else
 	int status;
 
 	while (wait3(&status, WNOHANG, (struct rusage *) NULL) > 0)
 		;
-#endif
-#ifdef linux
 	(void) signal(SIGCHLD, reapchild);	/* reset signal handler -ASP */
-#endif
 	errno = saved_errno;
 }
 
@@ -2424,9 +2352,7 @@ const char *cvthname(struct sockaddr_storage *f, int len)
 void domark()
 {
 	register struct filed *f;
-#ifdef SYSV
 	int lognum;
-#endif
 
 	if (MarkInterval > 0) {
 		now = time(0);
@@ -2437,12 +2363,9 @@ void domark()
 		}
 	}
 
-#ifdef SYSV
 	for (lognum = 0; lognum <= nlogs; lognum++) {
 		f = &Files[lognum];
-#else
-	for (f = Files; f; f = f->f_next) {
-#endif
+
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
 			dprintf("flush %s: repeated %d times, %ld sec.\n",
 				TypeNames[f->f_type], f->f_prevcount,
@@ -2558,11 +2481,6 @@ void init()
 	register int i, lognum;
 	register FILE *cf;
 	register struct filed *f;
-#ifndef TESTING
-#ifndef SYSV
-	register struct filed **nextp = (struct filed **) 0;
-#endif
-#endif
 	register char *p;
 	register unsigned int Forwarding = 0;
 #ifdef CONT_LINE
@@ -2611,13 +2529,8 @@ void init()
 		free((void *) Files);
 		Files = (struct filed *) 0;
 	}
-	
 
-#ifdef SYSV
 	lognum = 0;
-#else
-	f = NULL;
-#endif
 
         /* Get hostname */
 	(void) gethostname(LocalHostName, sizeof(LocalHostName));
@@ -2642,7 +2555,7 @@ void init()
 		hent = gethostbyname(LocalHostName);
 		if ( hent )
 			snprintf(LocalHostName, sizeof(LocalHostName), "%s", hent->h_name);
-			
+
 		if ( (p = strchr(LocalHostName, '.')) )
 		{
 			*p++ = '\0';
@@ -2660,7 +2573,6 @@ void init()
 	/* open the configuration file */
 	if ((cf = fopen(ConfFile, "r")) == NULL) {
 		dprintf("cannot open %s.\n", ConfFile);
-#ifdef SYSV
 		allocate_log();
 		f = &Files[lognum++];
 #ifndef TESTING
@@ -2668,12 +2580,6 @@ void init()
 #else
 		snprintf(cbuf,sizeof(cbuf), "*.*\t%s", ttyname(0));
 		cfline(cbuf, f);
-#endif
-#else
-		*nextp = (struct filed *)calloc(1, sizeof(*f));
-		cfline("*.ERR\t" _PATH_CONSOLE, *nextp);
-		(*nextp)->f_next = (struct filed *)calloc(1, sizeof(*f))	/* ASP */
-		cfline("*.PANIC\t*", (*nextp)->f_next);
 #endif
 		Initialized = 1;
 		return;
@@ -2713,11 +2619,7 @@ void init()
 			cline = cbuf;
 #endif
 		*++p = '\0';
-#ifndef SYSV
-		f = (struct filed *)calloc(1, sizeof(*f));
-		*nextp = f;
-		nextp = &f->f_next;
-#endif
+
 		allocate_log();
 		f = &Files[lognum++];
 #if CONT_LINE
@@ -2770,15 +2672,11 @@ void init()
 	Initialized = 1;
 
 	if ( Debug ) {
-#ifdef SYSV
 		for (lognum = 0; lognum <= nlogs; lognum++) {
 			f = &Files[lognum];
 			if (f->f_type != F_UNUSED) {
 				printf ("%2d: ", lognum);
-#else
-		for (f = Files; f; f = f->f_next) {
-			if (f->f_type != F_UNUSED) {
-#endif
+
 				for (i = 0; i <= LOG_NFACILITIES; i++)
 					if (f->f_pmask[i] == TABLE_NOPRI)
 						printf(" X ");
@@ -2862,10 +2760,6 @@ void cfline(line, f)
 
 	errno = 0;	/* keep strerror() stuff out of logerror messages */
 
-	/* clear out file entry */
-#ifndef SYSV
-	memset((char *) f, 0, sizeof(*f));
-#endif
 	for (i = 0; i <= LOG_NFACILITIES; i++) {
 		f->f_pmask[i] = TABLE_NOPRI;
 		f->f_flags = 0;
