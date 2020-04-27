@@ -837,10 +837,7 @@ void doexit(int sig);
 void init();
 void cfline(char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
-#if defined(__GLIBC__)
-#define dprintf mydprintf
-#endif /* __GLIBC__ */
-static void dprintf(char *, ...)
+static void verbosef(char *, ...)
 	SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 static void allocate_log(void);
 void sighup_handler();
@@ -954,12 +951,8 @@ int main(int argc, char **argv)
 {
 	register int i;
 	ssize_t msglen;
-#if !defined(__GLIBC__)
-	int len, num_fds;
-#else /* __GLIBC__ */
 	socklen_t len;
 	int num_fds;
-#endif /* __GLIBC__ */
 	/*
 	 * It took me quite some time to figure out how this is
 	 * supposed to work so I guess I should better write it down.
@@ -1090,7 +1083,7 @@ int main(int argc, char **argv)
 
 	if ( !(Debug || NoFork) )
 	{
-		dprintf("Checking pidfile.\n");
+		verbosef("Checking pidfile.\n");
 		if (!check_pid(PidFile))
 		{
 			pid_t pid;
@@ -1146,12 +1139,12 @@ int main(int argc, char **argv)
 	/* tuck my process id away */
 	if ( !Debug )
 	{
-		dprintf("Writing pidfile.\n");
+		verbosef("Writing pidfile.\n");
 		if (!check_pid(PidFile))
 		{
 			if (!write_pid(PidFile))
 			{
-				dprintf("Can't write pid.\n");
+				verbosef("Can't write pid.\n");
 				if (getpid() != ppid)
 					kill (ppid, SIGTERM);
 				exit(1);
@@ -1159,7 +1152,7 @@ int main(int argc, char **argv)
 		}
 		else
 		{
-			dprintf("Pidfile (and pid) already exist.\n");
+			verbosef("Pidfile (and pid) already exist.\n");
 			if (getpid() != ppid)
 				kill (ppid, SIGTERM);
 			exit(1);
@@ -1186,7 +1179,7 @@ int main(int argc, char **argv)
 
 	/* Create a partial message table for all file descriptors. */
 	num_fds = getdtablesize();
-	dprintf("Allocated parts table for %d file descriptors.\n", num_fds);
+	verbosef("Allocated parts table for %d file descriptors.\n", num_fds);
 	if ( (parts = (char **) malloc(num_fds * sizeof(char *))) == \
 	    (char **) 0 )
 	{
@@ -1200,12 +1193,12 @@ int main(int argc, char **argv)
 	for(i= 0; i < num_fds; ++i)
 	    parts[i] = (char *) 0;
 
-	dprintf("Starting.\n");
+	verbosef("Starting.\n");
 	init();
 
 	if ( Debug )
 	{
-		dprintf("Debugging disabled, SIGUSR1 to turn on debugging.\n");
+		verbosef("Debugging disabled, SIGUSR1 to turn on debugging.\n");
 		debugging_on = 0;
 	}
 	/*
@@ -1215,7 +1208,7 @@ int main(int argc, char **argv)
 		kill (ppid, SIGTERM);
 
 	if (server_user && drop_root()) {
-		dprintf("syslogd: failed to drop root\n");
+		verbosef("syslogd: failed to drop root\n");
 		exit(1);
 	}
 
@@ -1249,46 +1242,46 @@ int main(int argc, char **argv)
 					FD_SET(finet[i+1], &readfds);
 				if (finet[i+1]>maxfds) maxfds=finet[i+1];
 			}
-			dprintf("Listening on syslog UDP port.\n");
+			verbosef("Listening on syslog UDP port.\n");
 		}
 #endif
 
 		if ( debugging_on )
 		{
-			dprintf("Calling select, active file descriptors (max %d): ", maxfds);
+			verbosef("Calling select, active file descriptors (max %d): ", maxfds);
 			for (nfds= 0; nfds <= maxfds; ++nfds)
 				if ( FD_ISSET(nfds, &readfds) )
-					dprintf("%d ", nfds);
-			dprintf("\n");
+					verbosef("%d ", nfds);
+			verbosef("\n");
 		}
 		nfds = select(maxfds+1, (fd_set *) &readfds, (fd_set *) NULL,
 				  (fd_set *) NULL, (struct timeval *) NULL);
 		if ( restart )
 		{
 			restart = 0;
-			dprintf("\nReceived SIGHUP, reloading syslogd.\n");
+			verbosef("\nReceived SIGHUP, reloading syslogd.\n");
 			init();
 			continue;
 		}
 		if (nfds == 0) {
-			dprintf("No select activity.\n");
+			verbosef("No select activity.\n");
 			continue;
 		}
 		if (nfds < 0) {
 			if (errno != EINTR)
 				logerror("select");
-			dprintf("Select interrupted.\n");
+			verbosef("Select interrupted.\n");
 			continue;
 		}
 
 		if ( debugging_on )
 		{
-			dprintf("\nSuccessful select, descriptor count = %d, " \
+			verbosef("\nSuccessful select, descriptor count = %d, " \
 				"Activity on: ", nfds);
 			for (nfds= 0; nfds <= maxfds; ++nfds)
 				if ( FD_ISSET(nfds, &readfds) )
-					dprintf("%d ", nfds);
-			dprintf(("\n"));
+					verbosef("%d ", nfds);
+			verbosef(("\n"));
 		}
 
 #ifdef SYSLOG_UNIXAF
@@ -1296,11 +1289,11 @@ int main(int argc, char **argv)
 		    if ((fd = funix[i]) != -1 && FD_ISSET(fd, &readfds)) {
 			memset(line, 0, sizeof(line));
 			msglen = recv(fd, line, MAXLINE - 2, 0);
-			dprintf("Message from UNIX socket: #%d\n", fd);
+			verbosef("Message from UNIX socket: #%d\n", fd);
 			if (msglen > 0)
 				printchopped(LocalHostName, line, msglen + 2,  fd);
 			else if (msglen < 0 && errno != EINTR) {
-				dprintf("UNIX socket error: %d = %s.\n", \
+				verbosef("UNIX socket error: %d = %s.\n", \
 					errno, strerror(errno));
 				logerror("recvfrom UNIX");
 			}
@@ -1318,7 +1311,7 @@ int main(int argc, char **argv)
 						     (struct sockaddr *) &frominet, &len);
 					if (Debug) {
 						const char *addr = cvtaddr(&frominet, len);
-						dprintf("Message from inetd socket: #%d, host: %s\n",
+						verbosef("Message from inetd socket: #%d, host: %s\n",
 							i+1, addr);
 					}
 					if (msglen > 0) {
@@ -1329,7 +1322,7 @@ int main(int argc, char **argv)
 							printchopped(from, line,
 								     msglen + 2,  finet[i+1]);
 					} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
-						dprintf("INET socket error: %d = %s.\n", \
+						verbosef("INET socket error: %d = %s.\n", \
 							errno, strerror(errno));
 						logerror("recvfrom inet");
 						/* should be harmless now that we set
@@ -1371,7 +1364,7 @@ static int create_unix_socket(const char *path)
 	    chmod(path, 0666) < 0) {
 		(void) snprintf(line, sizeof(line), "cannot create %s", path);
 		logerror(line);
-		dprintf("cannot create %s (%d).\n", path, errno);
+		verbosef("cannot create %s (%d).\n", path, errno);
 		close(fd);
 		return -1;
 	}
@@ -1510,7 +1503,7 @@ crunch_list(list)
 #if 0
 	m = 0;
 	while (result[m])
-		dprintf ("#%d: %s\n", m, result[m++]);
+		verbosef ("#%d: %s\n", m, result[m++]);
 #endif
 	return result;
 }
@@ -1542,11 +1535,11 @@ void printchopped(hname, msg, len, fd)
 	          *end,
 		  tmpline[MAXLINE + 1];
 
-	dprintf("Message length: %lu, File descriptor: %d.\n", (unsigned long)len, fd);
+	verbosef("Message length: %lu, File descriptor: %d.\n", (unsigned long)len, fd);
 	tmpline[0] = '\0';
 	if ( parts[fd] != (char *) 0 )
 	{
-		dprintf("Including part from messages.\n");
+		verbosef("Including part from messages.\n");
 		strcpy(tmpline, parts[fd]);
 		free(parts[fd]);
 		parts[fd] = (char *) 0;
@@ -1558,8 +1551,8 @@ void printchopped(hname, msg, len, fd)
 		}
 		else
 		{
-			dprintf("Previous: %s\n", tmpline);
-			dprintf("Next: %s\n", msg);
+			verbosef("Previous: %s\n", tmpline);
+			verbosef("Next: %s\n", msg);
 			strcat(tmpline, msg);	/* length checked above */
 			printline(hname, tmpline);
 			if ( (strlen(msg) + 1) == len )
@@ -1581,7 +1574,7 @@ void printchopped(hname, msg, len, fd)
 		else
 		{
 			strcpy(parts[fd], p);
-			dprintf("Saving partial msg: %s\n", parts[fd]);
+			verbosef("Saving partial msg: %s\n", parts[fd]);
 			memset(p, '\0', ptlngth);
 		}
 	}
@@ -1733,7 +1726,7 @@ void logmsg(pri, msg, from, flags)
 	char *timestamp;
 	sigset_t mask;
 
-	dprintf("logmsg: %s, flags %x, from %s, msg %s\n", textpri(pri), flags, from, msg);
+	verbosef("logmsg: %s, flags %x, from %s, msg %s\n", textpri(pri), flags, from, msg);
 
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGHUP);
@@ -1803,13 +1796,13 @@ void logmsg(pri, msg, from, flags)
 		    !strcmp(from, f->f_prevhost)) {
 			(void) strncpy(f->f_lasttime, timestamp, 15);
 			f->f_prevcount++;
-			dprintf("msg repeated %d times, %ld sec of %ld.\n",
+			verbosef("msg repeated %d times, %ld sec of %ld.\n",
 			    f->f_prevcount, now - f->f_time,
 			    (long) repeatinterval[f->f_repeatcount]);
 
 			if (f->f_prevcount == 1 && DupesPending++ == 0) {
 				int seconds;
-				dprintf("setting alarm to flush duplicate messages\n");
+				verbosef("setting alarm to flush duplicate messages\n");
 
 				seconds = alarm(0);
 				MarkSeq += LastAlarm - seconds;
@@ -1835,7 +1828,7 @@ void logmsg(pri, msg, from, flags)
 				fprintlog(f, (char *)from, 0, (char *)NULL);
 
 				if (--DupesPending == 0) {
-					dprintf("unsetting duplicate message flush alarm\n");
+					verbosef("unsetting duplicate message flush alarm\n");
 
 					MarkSeq += LastAlarm - alarm(0);
 					LastAlarm = MarkInterval - MarkSeq;
@@ -1878,7 +1871,7 @@ void fprintlog(f, from, flags, msg)
 	int err;
 #endif
 
-	dprintf("Called fprintlog, ");
+	verbosef("Called fprintlog, ");
 
 	v->iov_base = f->f_lasttime;
 	v->iov_len = 15;
@@ -1906,26 +1899,26 @@ void fprintlog(f, from, flags, msg)
 	}
 	v++;
 
-	dprintf("logging to %s", TypeNames[f->f_type]);
+	verbosef("logging to %s", TypeNames[f->f_type]);
 
 	switch (f->f_type) {
 	case F_UNUSED:
 		f->f_time = now;
-		dprintf("\n");
+		verbosef("\n");
 		break;
 
 #ifdef SYSLOG_INET
 	case F_FORW_SUSP:
 		fwd_suspend = time((time_t *) 0) - f->f_time;
 		if ( fwd_suspend >= INET_SUSPEND_TIME ) {
-			dprintf("\nForwarding suspension over, " \
+			verbosef("\nForwarding suspension over, " \
 				"retrying FORW ");
 			f->f_type = F_FORW;
 			goto f_forw;
 		}
 		else {
-			dprintf(" %s\n", f->f_un.f_forw.f_hname);
-			dprintf("Forwarding suspension not over, time " \
+			verbosef(" %s\n", f->f_un.f_forw.f_hname);
+			verbosef("Forwarding suspension not over, time " \
 				"left: %ld.\n",
 				(long)(INET_SUSPEND_TIME - fwd_suspend));
 		}
@@ -1940,25 +1933,25 @@ void fprintlog(f, from, flags, msg)
 	 * is started after syslogd. 
 	 */
 	case F_FORW_UNKN:
-		dprintf(" %s\n", f->f_un.f_forw.f_hname);
+		verbosef(" %s\n", f->f_un.f_forw.f_hname);
 		fwd_suspend = time((time_t *) 0) - f->f_time;
 		if ( fwd_suspend >= INET_SUSPEND_TIME ) {
-			dprintf("Forwarding suspension to unknown over, retrying\n");
+			verbosef("Forwarding suspension to unknown over, retrying\n");
 			memset(&hints, 0, sizeof(hints));
 			hints.ai_family = family;
 			hints.ai_socktype = SOCK_DGRAM;
 			if ((err = getaddrinfo(f->f_un.f_forw.f_hname, "syslog", &hints, &ai))) {
-				dprintf("Failure: %s\n", gai_strerror(err));
-				dprintf("Retries: %d\n", f->f_prevcount);
+				verbosef("Failure: %s\n", gai_strerror(err));
+				verbosef("Retries: %d\n", f->f_prevcount);
 				if ( --f->f_prevcount < 0 ) {
-					dprintf("Giving up.\n");
+					verbosef("Giving up.\n");
 					f->f_type = F_UNUSED;
 				}
 				else
-					dprintf("Left retries: %d\n", f->f_prevcount);
+					verbosef("Left retries: %d\n", f->f_prevcount);
 			}
 			else {
-			        dprintf("%s found, resuming.\n", f->f_un.f_forw.f_hname);
+			        verbosef("%s found, resuming.\n", f->f_un.f_forw.f_hname);
 				f->f_un.f_forw.f_addr = ai;
 				f->f_prevcount = 0;
 				f->f_type = F_FORW;
@@ -1966,7 +1959,7 @@ void fprintlog(f, from, flags, msg)
 			}
 		}
 		else
-			dprintf("Forwarding suspension not over, time " \
+			verbosef("Forwarding suspension not over, time " \
 				"left: %ld\n", (long)(INET_SUSPEND_TIME - fwd_suspend));
 		break;
 
@@ -1977,9 +1970,9 @@ void fprintlog(f, from, flags, msg)
 		 * sent the message, we don't send it anyway)  -Joey
 		 */
 	f_forw:
-		dprintf(" %s\n", f->f_un.f_forw.f_hname);
+		verbosef(" %s\n", f->f_un.f_forw.f_hname);
 		if ( strcmp(from, LocalHostName) && NoHops )
-			dprintf("Not sending message to remote.\n");
+			verbosef("Not sending message to remote.\n");
 		else if (finet) {
 			int i;
 			f->f_time = now;
@@ -2004,7 +1997,7 @@ void fprintlog(f, from, flags, msg)
 					break;
 			}
 			if (err != -1) {
-				dprintf("INET sendto error: %d = %s.\n", 
+				verbosef("INET sendto error: %d = %s.\n", 
 					err, strerror(err));
 				f->f_type = F_FORW_SUSP;
 				errno = err;
@@ -2021,7 +2014,7 @@ void fprintlog(f, from, flags, msg)
 #else
 		if (flags & IGN_CONS) {	
 #endif
-			dprintf(" (ignored).\n");
+			verbosef(" (ignored).\n");
 			break;
 		}
 		/* FALLTHROUGH */
@@ -2030,7 +2023,7 @@ void fprintlog(f, from, flags, msg)
 	case F_FILE:
 	case F_PIPE:
 		f->f_time = now;
-		dprintf(" %s\n", f->f_un.f_fname);
+		verbosef(" %s\n", f->f_un.f_fname);
 		if (f->f_type == F_TTY || f->f_type == F_CONSOLE) {
 			v->iov_base = "\r\n";
 			v->iov_len = 2;
@@ -2090,7 +2083,7 @@ void fprintlog(f, from, flags, msg)
 	case F_USERS:
 	case F_WALL:
 		f->f_time = now;
-		dprintf("\n");
+		verbosef("\n");
 		v->iov_base = "\r\n";
 		v->iov_len = 2;
 		wallmsg(f, iov, 6);
@@ -2251,10 +2244,10 @@ const char *cvthname(struct sockaddr_storage *f, int len)
 
 	if ((error = getnameinfo((struct sockaddr *) f, len,
 				 hname, NI_MAXHOST, NULL, 0, NI_NAMEREQD))) {
-		dprintf("Host name for your address (%s) unknown: %s\n", hname, gai_strerror(error));
+		verbosef("Host name for your address (%s) unknown: %s\n", hname, gai_strerror(error));
 		if ((error = getnameinfo((struct sockaddr *) f, len,
 					 hname, NI_MAXHOST, NULL, 0, NI_NUMERICHOST))) {
-			dprintf("Malformed from address: %s\n", gai_strerror(error));
+			verbosef("Malformed from address: %s\n", gai_strerror(error));
 			return "???";
 		}
 		return hname;
@@ -2319,7 +2312,7 @@ void domark()
 		f = &Files[lognum];
 
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
-			dprintf("flush %s: repeated %d times, %ld sec.\n",
+			verbosef("flush %s: repeated %d times, %ld sec.\n",
 				TypeNames[f->f_type], f->f_prevcount,
 				(long) repeatinterval[f->f_repeatcount]);
 			fprintlog(f, LocalHostName, 0, (char *)NULL);
@@ -2339,7 +2332,7 @@ void domark()
 void debug_switch()
 
 {
-	dprintf("Switching debugging_on to %s\n", (debugging_on == 0) ? "true" : "false");
+	verbosef("Switching debugging_on to %s\n", (debugging_on == 0) ? "true" : "false");
 	debugging_on = (debugging_on == 0) ? 1 : 0;
 	signal(SIGUSR1, debug_switch);
 }
@@ -2352,7 +2345,7 @@ void logerror(const char *type)
 {
 	char buf[100];
 
-	dprintf("Called logerr, msg: %s\n", type);
+	verbosef("Called logerr, msg: %s\n", type);
 
 	if (errno == 0)
 		(void) snprintf(buf, sizeof(buf), "syslogd: %s", type);
@@ -2386,7 +2379,7 @@ void die(sig)
 
 	Initialized = was_initialized;
 	if (sig) {
-		dprintf("syslogd: exiting on signal %d\n", sig);
+		verbosef("syslogd: exiting on signal %d\n", sig);
 		(void) snprintf(buf, sizeof(buf), "exiting on signal %d", sig);
 		errno = 0;
 		logmsg(LOG_SYSLOG|LOG_INFO, buf, LocalHostName, ADDDATE);
@@ -2440,11 +2433,11 @@ void init()
 	/*
 	 *  Close all open log files and free log descriptor array.
 	 */
-	dprintf("Called init.\n");
+	verbosef("Called init.\n");
 	Initialized = 0;
 	if ( nlogs > -1 )
 	{
-		dprintf("Initializing log structures.\n");
+		verbosef("Initializing log structures.\n");
 
 		for (lognum = 0; lognum <= nlogs; lognum++ ) {
 			f = &Files[lognum];
@@ -2518,7 +2511,7 @@ void init()
 
 	/* open the configuration file */
 	if ((cf = fopen(ConfFile, "r")) == NULL) {
-		dprintf("cannot open %s.\n", ConfFile);
+		verbosef("cannot open %s.\n", ConfFile);
 		allocate_log();
 		f = &Files[lognum++];
 
@@ -2580,7 +2573,7 @@ void init()
 			*/
 			continue;
 		if ((funix[i] = create_unix_socket(funixn[i])) != -1)
-			dprintf("Opened UNIX socket `%s'.\n", funixn[i]);
+			verbosef("Opened UNIX socket `%s'.\n", funixn[i]);
 	}
 #endif
 
@@ -2590,7 +2583,7 @@ void init()
 			finet = create_inet_sockets();
 			if (finet) {
 				InetInuse = 1;
-				dprintf("Opened syslog UDP port.\n");
+				verbosef("Opened syslog UDP port.\n");
 			}
 		}
 	}
@@ -2665,7 +2658,7 @@ void init()
 		       ": restart." , LocalHostName, ADDDATE);
 #endif
 	(void) signal(SIGHUP, sighup_handler);
-	dprintf("syslogd: restarted.\n");
+	verbosef("syslogd: restarted.\n");
 }
 #if FALSE
 }}} /* balance parentheses for emacs */
@@ -2693,7 +2686,7 @@ void cfline(line, f)
 	char buf[MAXLINE];
 	char xbuf[200];
 
-	dprintf("cfline(%s)\n", line);
+	verbosef("cfline(%s)\n", line);
 
 	errno = 0;	/* keep strerror() stuff out of logerror messages */
 
@@ -2835,13 +2828,13 @@ void cfline(line, f)
 	} else
 		syncfile = 1;
 
-	dprintf("leading char in action: %c\n", *p);
+	verbosef("leading char in action: %c\n", *p);
 	switch (*p)
 	{
 	case '@':
 #ifdef SYSLOG_INET
 		(void) strcpy(f->f_un.f_forw.f_hname, ++p);
-		dprintf("forwarding host: %s\n", p);	/*ASP*/
+		verbosef("forwarding host: %s\n", p);	/*ASP*/
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_family = family;
 		hints.ai_socktype = SOCK_DGRAM;
@@ -2866,7 +2859,7 @@ void cfline(line, f)
         case '|':
 	case '/':
 		(void) strcpy(f->f_un.f_fname, p);
-		dprintf ("filename: %s\n", p);	/*ASP*/
+		verbosef ("filename: %s\n", p);	/*ASP*/
 		if (syncfile)
 			f->f_flags |= SYNC_FILE;
 		if ( *p == '|' ) {
@@ -2880,7 +2873,7 @@ void cfline(line, f)
 
 		if ( f->f_file < 0 ){
 			f->f_file = -1;
-			dprintf("Error opening log file: %s\n", p);
+			verbosef("Error opening log file: %s\n", p);
 			logerror(p);
 			break;
 		}
@@ -2894,12 +2887,12 @@ void cfline(line, f)
 		break;
 
 	case '*':
-		dprintf ("write-all\n");
+		verbosef ("write-all\n");
 		f->f_type = F_WALL;
 		break;
 
 	default:
-		dprintf ("users: %s\n", p);	/* ASP */
+		verbosef ("users: %s\n", p);	/* ASP */
 		for (i = 0; i < MAXUNAMES && *p; i++) {
 			for (q = p; *q && *q != ','; )
 				q++;
@@ -2931,10 +2924,10 @@ int decode(name, codetab)
 	register char *p;
 	char buf[80];
 
-	dprintf ("symbolic name: %s", name);
+	verbosef ("symbolic name: %s", name);
 	if (isdigit(*name))
 	{
-		dprintf ("\n");
+		verbosef ("\n");
 		return (atoi(name));
 	}
 	(void) strncpy(buf, name, 79);
@@ -2944,20 +2937,19 @@ int decode(name, codetab)
 	for (c = codetab; c->c_name; c++)
 		if (!strcmp(buf, c->c_name))
 		{
-			dprintf (" ==> %d\n", c->c_val);
+			verbosef (" ==> %d\n", c->c_val);
 			return (c->c_val);
 		}
 	return (-1);
 }
 
-static void dprintf(char *fmt, ...)
-
+static void verbosef(char *fmt, ...)
 {
 	va_list ap;
 
 	if ( !(Debug && debugging_on) )
 		return;
-	
+
 	va_start(ap, fmt);
 	vfprintf(stdout, fmt, ap);
 	va_end(ap);
@@ -2974,7 +2966,7 @@ static void dprintf(char *fmt, ...)
 static void allocate_log()
 
 {
-	dprintf("Called allocate_log, nlogs = %d.\n", nlogs);
+	verbosef("Called allocate_log, nlogs = %d.\n", nlogs);
 	
 	/*
 	 * Decide whether the array needs to be initialized or needs to
@@ -2985,7 +2977,7 @@ static void allocate_log()
 		Files = (struct filed *) malloc(sizeof(struct filed));
 		if ( Files == (void *) 0 )
 		{
-			dprintf("Cannot initialize log structure.");
+			verbosef("Cannot initialize log structure.");
 			logerror("Cannot initialize log structure.");
 			return;
 		}
@@ -2997,7 +2989,7 @@ static void allocate_log()
 						  sizeof(struct filed));
 		if ( Files == (struct filed *) 0 )
 		{
-			dprintf("Cannot grow log structure.");
+			verbosef("Cannot grow log structure.");
 			logerror("Cannot grow log structure.");
 			return;
 		}
