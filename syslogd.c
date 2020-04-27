@@ -79,7 +79,7 @@
 #endif
 #endif
 
-#ifndef _PATH_LOGCONF 
+#ifndef _PATH_LOGCONF
 #define _PATH_LOGCONF	"/etc/syslog.conf"
 #endif
 
@@ -120,11 +120,11 @@
 #define _PATH_DEVNULL	"/dev/null"
 #endif
 
-char	*ConfFile = _PATH_LOGCONF;
-char	*PidFile = _PATH_LOGPID;
-char	ctty[] = _PATH_CONSOLE;
+static char	*ConfFile = _PATH_LOGCONF;
+static char	*PidFile = _PATH_LOGPID;
+static char	ctty[] = _PATH_CONSOLE;
 
-char	**parts;
+static char	**parts;
 
 static int debugging_on = 0;
 static int nlogs = -1;
@@ -132,9 +132,9 @@ static int restart = 0;
 
 #define MAXFUNIX	20
 
-int nfunix = 1;
-const char *funixn[MAXFUNIX] = { _PATH_LOG };
-int funix[MAXFUNIX] = { -1, };
+static int nfunix = 1;
+static const char *funixn[MAXFUNIX] = { _PATH_LOG };
+static int funix[MAXFUNIX] = { -1, };
 
 #ifdef UT_NAMESIZE
 # define UNAMESZ	UT_NAMESIZE	/* length of a login name */
@@ -159,19 +159,6 @@ int funix[MAXFUNIX] = { -1, };
 #define SYNC_FILE	0x002	/* do fsync on file after printing */
 #define ADDDATE		0x004	/* add a date to the message */
 #define MARK		0x008	/* this message is a mark */
-
-/*
- * This table contains plain text for h_errno errors used by the
- * net subsystem.
- */
-const char *sys_h_errlist[] = {
-    "No problem",						/* NETDB_SUCCESS */
-    "Authoritative answer: host not found",			/* HOST_NOT_FOUND */
-    "Non-authoritative answer: host not found, or serverfail",	/* TRY_AGAIN */
-    "Non recoverable errors",					/* NO_RECOVERY */
-    "Valid name, no data record of requested type",		/* NO_DATA */
-    "no address, look for MX record"				/* NO_ADDRESS */
- };
 
 /*
  * This structure represents the files that will have log
@@ -207,7 +194,7 @@ struct filed {
  * in seconds after previous message is logged.  After each flush,
  * we move to the next interval until we reach the largest.
  */
-time_t	repeatinterval[] = { 30, 60 };	/* # of secs before flush */
+static time_t repeatinterval[] = { 30, 60 };	/* # of secs before flush */
 #define	MAXREPEAT ((int) ((sizeof(repeatinterval) / sizeof(repeatinterval[0])) - 1))
 #define	REPEATTIME(f)	((f)->f_time + repeatinterval[(f)->f_repeatcount])
 #define	BACKOFF(f)	{ if (++(f)->f_repeatcount > MAXREPEAT) \
@@ -231,21 +218,21 @@ time_t	repeatinterval[] = { 30, 60 };	/* # of secs before flush */
 #define F_FORW_SUSP	7		/* suspended host forwarding */
 #define F_FORW_UNKN	8		/* unknown host forwarding */
 #define F_PIPE		9		/* named pipe */
-char	*TypeNames[] = {
+static char *TypeNames[] = {
 	"UNUSED",	"FILE",		"TTY",		"CONSOLE",
 	"FORW",		"USERS",	"WALL",		"FORW(SUSPENDED)",
 	"FORW(UNKNOWN)", "PIPE"
 };
 
-struct	filed *Files = (struct filed *) 0;
-struct	filed consfile;
+static struct filed *Files = (struct filed *) 0;
+static struct filed consfile;
 
 struct code {
 	char	*c_name;
 	int	c_val;
 };
 
-struct code	PriNames[] = {
+static struct code PriNames[] = {
 	{"alert",	LOG_ALERT},
 	{"crit",	LOG_CRIT},
 	{"debug",	LOG_DEBUG},
@@ -262,7 +249,7 @@ struct code	PriNames[] = {
 	{NULL,		-1}
 };
 
-struct code	FacNames[] = {
+static struct code FacNames[] = {
 	{"auth",         LOG_AUTH},
 	{"authpriv",     LOG_AUTHPRIV},
 	{"cron",         LOG_CRON},
@@ -290,36 +277,38 @@ struct code	FacNames[] = {
 	{NULL,           -1},
 };
 
-int	Debug;			/* debug flag */
-int	Compress = 1;		/* compress repeated messages flag */
-char	LocalHostName[MAXHOSTNAMELEN+1];	/* our hostname */
-char	*LocalDomain;		/* our local domain name */
-char	*emptystring = "";
-int	InetInuse = 0;		/* non-zero if INET sockets are being used */
-int	*finet = NULL;		/* Internet datagram sockets */
-int	Initialized = 0;	/* set when we have initialized ourselves */
-int	MarkInterval = 20 * 60;	/* interval between marks in seconds */
+static int	Debug;			/* debug flag */
+static int	Compress = 1;		/* compress repeated messages flag */
+static char	LocalHostName[MAXHOSTNAMELEN+1];	/* our hostname */
+static char	*LocalDomain;		/* our local domain name */
+static char	*emptystring = "";
+static int	InetInuse = 0;		/* non-zero if INET sockets are being used */
+static int	*finet = NULL;		/* Internet datagram sockets */
+static int	Initialized = 0;	/* set when we have initialized ourselves */
+static int	MarkInterval = 20 * 60;	/* interval between marks in seconds */
 #ifdef INET6
-int	family = PF_UNSPEC;	/* protocol family (IPv4, IPv6 or both) */
+static int	family = PF_UNSPEC;	/* protocol family (IPv4, IPv6 or both) */
 #else
-int	family = PF_INET;	/* protocol family (IPv4 only) */
+static int	family = PF_INET;	/* protocol family (IPv4 only) */
 #endif
-int	send_to_all = 0;	/* send message to all IPv4/IPv6 addresses */
-int	MarkSeq = 0;		/* mark sequence number */
-int	LastAlarm = 0;		/* last value passed to alarm() (seconds)  */
-int	DupesPending = 0;	/* Number of unflushed duplicate messages */
-int	NoFork = 0; 		/* don't fork - don't run in daemon mode */
-int	AcceptRemote = 0;	/* receive messages that come via UDP */
-char	**StripDomains = NULL;	/* these domains may be stripped before writing logs */
-char	**LocalHosts = NULL;	/* these hosts are logged with their hostname */
-int	NoHops = 1;		/* Can we bounce syslog messages through an
-				   intermediate host. */
+static int	send_to_all = 0;	/* send message to all IPv4/IPv6 addresses */
+static int	MarkSeq = 0;		/* mark sequence number */
+static int	LastAlarm = 0;		/* last value passed to alarm() (seconds)  */
+static int	DupesPending = 0;	/* Number of unflushed duplicate messages */
+static int	NoFork = 0; 		/* don't fork - don't run in daemon mode */
+static int	AcceptRemote = 0;	/* receive messages that come via UDP */
+static char	**StripDomains = NULL;	/* these domains may be stripped before writing logs */
+static char	**LocalHosts = NULL;	/* these hosts are logged with their hostname */
+static int	NoHops = 1;		/* Can we bounce syslog messages through an
+					   intermediate host. */
 
-char	*bind_addr = NULL;	/* bind UDP port to this interface only */
-char	*server_user = NULL;	/* user name to run server as */
-char	*chroot_dir = NULL;	/* user name to run server as */
+static char	*bind_addr = NULL;	/* bind UDP port to this interface only */
+static char	*server_user = NULL;	/* user name to run server as */
+static char	*chroot_dir = NULL;	/* user name to run server as */
 
-extern	int errno;
+#ifndef errno
+extern int errno;
+#endif
 
 /* Function prototypes. */
 int main(int argc, char **argv);
@@ -331,13 +320,13 @@ void printline(const char *hname, char *msg);
 void printsys(char *msg);
 void logmsg(int pri, char *msg, const char *from, int flags);
 void fprintlog(register struct filed *f, char *from, int flags, char *msg);
-void endtty();
+void endtty(int);
 void wallmsg(register struct filed *f, struct iovec *iov, size_t iovsz);
-void reapchild();
+void reapchild(int);
 const char *cvtaddr(struct sockaddr_storage *f, int len);
 const char *cvthname(struct sockaddr_storage *f, int len);
-void domark();
-void debug_switch();
+void domark(int);
+void debug_switch(int);
 void logerror(const char *type);
 void die(int sig);
 void doexit(int sig);
@@ -347,7 +336,7 @@ int decode(char *name, struct code *codetab);
 static void verbosef(char *, ...)
 	SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 static void allocate_log(void);
-void sighup_handler();
+void sighup_handler(int);
 
 #ifdef SYSLOG_UNIXAF
 static int create_unix_socket(const char *path);
@@ -843,7 +832,7 @@ int main(int argc, char **argv)
 	}
 }
 
-int usage()
+int usage(void)
 {
 	fprintf(stderr, "usage: syslogd [-46Acdrvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n" \
 		" [-s domainlist] [-f conffile] [-i IP address] [-u username]\n");
@@ -880,7 +869,7 @@ static int create_unix_socket(const char *path)
 #endif
 
 #ifdef SYSLOG_INET
-static int *create_inet_sockets()
+static int *create_inet_sockets(void)
 {
 	struct addrinfo hints, *res, *r;
 	int error, maxs, *s, *socks;
@@ -959,8 +948,7 @@ static int *create_inet_sockets()
 #endif
 
 char **
-crunch_list(list)
-	char *list;
+crunch_list(char *list)
 {
 	int i, m, n;
 	char *p, *q;
@@ -1011,12 +999,11 @@ crunch_list(list)
 }
 
 
-void untty()
+void untty(void)
 {
-	if ( !Debug ) {
+	if (!Debug) {
 		setsid();
 	}
-	return;
 }
 
 /*
@@ -1024,11 +1011,7 @@ void untty()
  * than one message.
  */
 
-void printchopped(hname, msg, len, fd)
-	const char *hname;
-	char *msg;
-	size_t len;
-	int fd;
+void printchopped(const char *hname, char *msg, size_t len, int fd)
 {
 	auto int ptlngth;
 
@@ -1097,9 +1080,7 @@ void printchopped(hname, msg, len, fd)
  * on the appropriate log files.
  */
 
-void printline(hname, msg)
-	const char *hname;
-	char *msg;
+void printline(const char *hname, char *msg)
 {
 	register char *p, *q;
 	register unsigned char c;
@@ -1156,8 +1137,7 @@ void printline(hname, msg)
  * Take a raw input line from /dev/klog, split and format similar to syslog().
  */
 
-void printsys(msg)
-	char *msg;
+void printsys(char *msg)
 {
 	register char *p, *q;
 	register int c;
@@ -1195,8 +1175,7 @@ void printsys(msg)
 /*
  * Decode a priority into textual information like auth.emerg.
  */
-char *textpri(pri)
-	int pri;
+static char *textpri(int pri)
 {
 	static char res[20];
 	CODE *c_pri, *c_fac;
@@ -1209,18 +1188,14 @@ char *textpri(pri)
 	return res;
 }
 
-time_t	now;
+static time_t now;
 
 /*
  * Log a message to the appropriate log files, users, etc. based on
  * the priority.
  */
 
-void logmsg(pri, msg, from, flags)
-	int pri;
-	char *msg;
-	const char *from;
-	int flags;
+void logmsg(int pri, char *msg, const char *from, int flags)
 {
 	register struct filed *f;
 	int fac, prilev, lognum;
@@ -1356,11 +1331,7 @@ void logmsg(pri, msg, from, flags)
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
 }
 
-void fprintlog(f, from, flags, msg)
-	register struct filed *f;
-	char *from;
-	int flags;
-	char *msg;
+void fprintlog(struct filed *f, char *from, int flags, char *msg)
 {
 	struct iovec iov[6];
 	register struct iovec *v = iov;
@@ -1596,9 +1567,9 @@ void fprintlog(f, from, flags, msg)
 	return;
 }
 
-jmp_buf ttybuf;
+static jmp_buf ttybuf;
 
-void endtty()
+void endtty(int sig)
 {
 	longjmp(ttybuf, 1);
 }
@@ -1610,10 +1581,7 @@ void endtty()
  *	world, or a list of approved users.
  */
 
-void wallmsg(f, iov, iovsz)
-	register struct filed *f;
-	struct iovec *iov;
-	size_t iovsz;
+void wallmsg(struct filed *f, struct iovec *iov, size_t iovsz)
 {
 	char p[sizeof (_PATH_DEV) + UNAMESZ];
 	register int i;
@@ -1704,7 +1672,7 @@ void wallmsg(f, iov, iovsz)
 	reenter = 0;
 }
 
-void reapchild()
+void reapchild(int sig)
 {
 	int saved_errno = errno;
 	int status;
@@ -1793,13 +1761,13 @@ const char *cvthname(struct sockaddr_storage *f, int len)
 	return (hname);
 }
 
-void domark()
+void domark(int sig)
 {
 	register struct filed *f;
 	int lognum;
 
 	if (MarkInterval > 0) {
-		now = time(0);
+		now = time(NULL);
 		MarkSeq += LastAlarm;
 		if (MarkSeq >= MarkInterval) {
 			logmsg(LOG_MARK|LOG_INFO, "-- MARK --", LocalHostName, ADDDATE|MARK);
@@ -1828,8 +1796,7 @@ void domark()
 	(void) alarm(LastAlarm);
 }
 
-void debug_switch()
-
+void debug_switch(int sig)
 {
 	verbosef("Switching debugging_on to %s\n", (debugging_on == 0) ? "true" : "false");
 	debugging_on = (debugging_on == 0) ? 1 : 0;
@@ -1855,10 +1822,7 @@ void logerror(const char *type)
 	return;
 }
 
-void die(sig)
-
-	int sig;
-	
+void die(int sig)
 {
 	register struct filed *f;
 	char buf[100];
@@ -1908,8 +1872,7 @@ void die(sig)
 /*
  * Signal handler to terminate the parent process.
  */
-void doexit(sig)
-	int sig;
+void doexit(int sig)
 {
 	_exit(0);
 }
@@ -1918,7 +1881,7 @@ void doexit(sig)
  *  INIT -- Initialize syslogd from configuration table
  */
 
-void init()
+void init(void)
 {
 	register int i, lognum;
 	register FILE *cf;
@@ -2153,9 +2116,7 @@ void init()
  * Crack a configuration file line
  */
 
-void cfline(line, f)
-	char *line;
-	register struct filed *f;
+void cfline(char *line, struct filed *f)
 {
 	register char *p;
 	register char *q;
@@ -2401,9 +2362,7 @@ void cfline(line, f)
  *  Decode a symbolic name to a numeric value
  */
 
-int decode(name, codetab)
-	char *name;
-	struct code *codetab;
+int decode(char *name, struct code *codetab)
 {
 	register struct code *c;
 	register char *p;
@@ -2448,11 +2407,10 @@ static void verbosef(char *fmt, ...)
  * The following function is responsible for allocating/reallocating the
  * array which holds the structures which define the logging outputs.
  */
-static void allocate_log()
-
+static void allocate_log(void)
 {
 	verbosef("Called allocate_log, nlogs = %d.\n", nlogs);
-	
+
 	/*
 	 * Decide whether the array needs to be initialized or needs to
 	 * grow.
@@ -2479,7 +2437,7 @@ static void allocate_log()
 			return;
 		}
 	}
-	
+
 	/*
 	 * Initialize the array element, bump the number of elements in the
 	 * the array and return.
@@ -2496,12 +2454,10 @@ static void allocate_log()
  * doing this during a signal handler.  Instead this function simply sets
  * a flag variable which will tell the main loop to go through a restart.
  */
-void sighup_handler()
-
+void sighup_handler(int sig)
 {
 	restart = 1;
 	signal(SIGHUP, sighup_handler);
-	return;
 }
 
 /*

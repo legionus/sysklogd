@@ -27,6 +27,8 @@
 #include <errno.h>
 #include <signal.h>
 
+#include "pidfile.h"
+
 /* read_pid
  *
  * Reads the specified pidfile and returns the read pid.

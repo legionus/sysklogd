@@ -44,16 +44,6 @@ static const char *LogTag = "syslog";	/* string to tag the entry with */
 static int	LogFacility = LOG_USER;	/* default facility code */
 
 void
-syslog(int pri, const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	vsyslog(pri, fmt, ap);
-	va_end(ap);
-}
-
-void
 __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
 {
 	register int cnt;
@@ -97,7 +87,7 @@ __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
 	/* substitute error message for %m */
 	{
 		register char ch, *t1, *t2;
-		char *strerror();
+//		char *strerror();
 
 		for (t1 = fmt_cpy;
 		     (ch = *fmt) != '\0' && t1<fmt_cpy+sizeof(fmt_cpy);
@@ -171,14 +161,22 @@ vsyslog(int pri, const char *fmt, va_list ap)
 	__vsyslog_chk (pri, -1, fmt, ap);
 }
 
+void
+syslog(int pri, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsyslog(pri, fmt, ap);
+	va_end(ap);
+}
+
 static struct sockaddr SyslogAddr;	/* AF_UNIX address of local logger */
 /*
  * OPENLOG -- open system log
  */
 void
-openlog(ident, logstat, logfac)
-	const char *ident;
-	int logstat, logfac;
+openlog(const char *ident, int logstat, int logfac)
 {
 	if (ident != NULL)
 		LogTag = ident;
@@ -210,7 +208,7 @@ openlog(ident, logstat, logfac)
  * CLOSELOG -- close the system log
  */
 void
-closelog()
+closelog(void)
 {
 	(void) close(LogFile);
 	LogFile = -1;
@@ -222,8 +220,7 @@ static int	LogMask = 0xff;		/* mask of priorities to be logged */
  * SETLOGMASK -- set the log mask level
  */
 int
-setlogmask(pmask)
-	int pmask;
+setlogmask(int pmask)
 {
 	int omask;
 

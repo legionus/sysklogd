@@ -80,19 +80,15 @@ static FILE *output_file = (FILE *) 0;
 static enum LOGSRC {none, proc, kernel} logsrc;
 
 int debugging = 0;
-int symbols_twice = 0;
+static int symbols_twice = 0;
 
-char *server_user = NULL;
-char *chroot_dir = NULL;
-int log_flags = 0;
+static char *server_user = NULL;
+static char *chroot_dir = NULL;
+static int log_flags = 0;
 
 /* Function prototypes. */
 extern int ksyslog(int type, char *buf, int len);
 static void CloseLogSrc(void);
-extern void restart(int sig);
-extern void stop_logging(int sig);
-extern void stop_daemon(int sig);
-extern void reload_daemon(int sig);
 static void Terminate(void);
 static void SignalDaemon(int);
 static void ReloadSymbols(void);
@@ -104,8 +100,7 @@ static void LogProcLine(void);
 extern int main(int argc, char *argv[]);
 
 
-static void CloseLogSrc()
-
+static void CloseLogSrc(void)
 {
         /* Shutdown the log sources. */
 	switch ( logsrc )
@@ -131,18 +126,12 @@ static void CloseLogSrc()
 /*
  * Signal handler to terminate the parent process.
  */
-void doexit(sig)
-
-	int sig;
-
+static void doexit(int sig)
 {
 	exit (0);
 }
 
-void restart(sig)
-	
-	int sig;
-
+static void restart(int sig)
 {
 	signal(SIGCONT, restart);
 	change_state = 1;
@@ -151,10 +140,7 @@ void restart(sig)
 }
 
 
-void stop_logging(sig)
-
-	int sig;
-	
+static void stop_logging(int sig)
 {
 	signal(SIGTSTP, stop_logging);
 	change_state = 1;
@@ -163,24 +149,17 @@ void stop_logging(sig)
 }
 
 
-void stop_daemon(sig)
-
-	int sig;
-
+static void stop_daemon(int sig)
 {
 	Terminate();
 	return;
 }
 
 
-void reload_daemon(sig)
-
-     int sig;
-
+static void reload_daemon(int sig)
 {
 	change_state = 1;
 	reload_symbols = 1;
-
 
 	if ( sig == SIGUSR2 )
 	{
@@ -189,13 +168,12 @@ void reload_daemon(sig)
 	}
 	else
 		signal(SIGUSR1, reload_daemon);
-		
+
 	return;
 }
 
 
-static void Terminate()
-
+static void Terminate(void)
 {
 	CloseLogSrc();
 	Syslog(LOG_INFO, "Kernel log daemon terminating.");
@@ -207,20 +185,14 @@ static void Terminate()
 	exit(1);
 }
 
-static void SignalDaemon(sig)
-
-     int sig;
-
+static void SignalDaemon(int sig)
 {
-	auto int pid = check_pid(PidFile);
-
+	int pid = check_pid(PidFile);
 	kill(pid, sig);
-	return;
 }
 
 
-static void ReloadSymbols()
-
+static void ReloadSymbols(void)
 {
 	if (symbol_lookup) {
 		if ( reload_symbols > 1 )
@@ -228,12 +200,10 @@ static void ReloadSymbols()
 		InitMsyms();
 	}
 	reload_symbols = change_state = 0;
-	return;
 }
 
 
 static void ChangeLogging(void)
-
 {
 	/* Terminate kernel logging. */
 	if ( terminate == 1 )
@@ -258,7 +228,7 @@ static void ChangeLogging(void)
 		change_state = 0;
 		return;
 	}
-		
+
 	/*
 	 * The rest of this function is responsible for restarting
 	 * kernel logging after it was stopped.
@@ -282,10 +252,8 @@ static void ChangeLogging(void)
 
 
 static enum LOGSRC GetKernelLogSrc(void)
-
 {
-	auto struct stat sb;
-
+	struct stat sb;
 
 	/* Set level of kernel console messaging.. */
 	if ( (console_log_level != -1)
@@ -329,9 +297,7 @@ static enum LOGSRC GetKernelLogSrc(void)
 	return(proc);
 }
 
-
-extern void Syslog(int priority, char *fmt, ...)
-
+void Syslog(int priority, char *fmt, ...)
 {
 	va_list ap;
 	char *argl;
@@ -355,7 +321,7 @@ extern void Syslog(int priority, char *fmt, ...)
 			fsync(fileno(output_file));
 		return;
 	}
-	
+
 	/* Output using syslog. */
 	if (!strcmp(fmt, "%s"))
 	{
@@ -450,7 +416,7 @@ static void LogLine(char *ptr, int len)
     enum parse_state_enum {
         PARSING_TEXT,
         PARSING_SYMSTART,      /* at < */
-        PARSING_SYMBOL,        
+        PARSING_SYMBOL,
         PARSING_SYMEND         /* at ] */
     };
 
@@ -660,7 +626,6 @@ static void LogLine(char *ptr, int len)
 
 
 static void LogKernelLine(void)
-
 {
 	auto int rdcnt;
 
@@ -685,7 +650,6 @@ static void LogKernelLine(void)
 
 
 static void LogProcLine(void)
-
 {
 	auto int rdcnt;
 
@@ -735,12 +699,7 @@ static int drop_root(void)
 }
 
 
-int main(argc, argv)
-
-	int argc;
-
-	char *argv[];
-
+int main(int argc, char *argv[])
 {
 	auto int	ch,
 			use_output = 0;
@@ -792,7 +751,7 @@ int main(argc, argv)
 			break;
 		    case 'p':
 			SetParanoiaLevel(1);	/* Load symbols on oops. */
-			break;	
+			break;
 		    case 's':		/* Use syscall interface. */
 			use_syscall = 1;
 			break;
@@ -823,7 +782,7 @@ int main(argc, argv)
 			return(1);
 		}
 		console_log_level = *log_level - '0';
-	}		
+	}
 
 	/*
 	 * The following code allows klogd to auto-background itself.

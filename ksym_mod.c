@@ -64,15 +64,11 @@
 #define KSYMS  "/proc/kallsyms"
 
 static int num_modules = 0;
-struct Module *sym_array_modules = (struct Module *) 0;
+static struct Module *sym_array_modules = (struct Module *) 0;
 
 static int have_modules = 0;
 
-#if defined(TEST)
-static int debugging = 1;
-#else
 extern int debugging;
-#endif
 
 
 /* Function prototypes. */
@@ -100,8 +96,7 @@ extern int num_syms;
  *		True if loading is successful.
  **************************************************************************/
 
-extern int InitMsyms()
-
+int InitMsyms(void)
 {
 	auto int	rtn,
 			tmp;
@@ -174,12 +169,7 @@ extern int InitMsyms()
 }
 
 
-static int symsort(p1, p2)
-
-     const void *p1;
-
-     const void *p2;
-
+static int symsort(const void *p1, const void *p2)
 {
 	auto const struct sym_table	*sym1 = p1,
 					*sym2 = p2;
@@ -203,8 +193,7 @@ static int symsort(p1, p2)
  * Return:	void
  **************************************************************************/
 
-static void FreeModules()
-
+static void FreeModules(void)
 {
 	auto int	nmods,
 			nsyms;
@@ -225,7 +214,6 @@ static void FreeModules()
 		mp = &sym_array_modules[nmods];
 		if ( mp->num_syms == 0 )
 			continue;
-	       
 		for (nsyms= 0; nsyms < mp->num_syms; ++nsyms)
 			free(mp->sym_array[nsyms].name);
 		free(mp->sym_array);
@@ -253,10 +241,7 @@ static void FreeModules()
  * Return:	struct Module *
  **************************************************************************/
 
-struct Module *AddModule(module)
-
-     const char *module;
-
+struct Module *AddModule(const char *module)
 {
 	struct Module *mp;
 
@@ -322,10 +307,7 @@ struct Module *AddModule(module)
  *		successful.  False if not.
  **************************************************************************/
 
-static int AddSymbol(line)
-
-	const char *line;
-	
+static int AddSymbol(const char *line)
 {
 	char *module;
 	unsigned long address;
@@ -384,7 +366,7 @@ static int AddSymbol(line)
 	mp->sym_array[mp->num_syms].name = strdup(p);
 	if ( mp->sym_array[mp->num_syms].name == (char *) 0 )
 		return(0);
-	
+
 	/* Stuff interesting information into the module. */
 	mp->sym_array[mp->num_syms].value = address;
 	++mp->num_syms;
@@ -402,7 +384,7 @@ static int AddSymbol(line)
  * Arguments:	(long int) value, (struct symbol *) sym
  *
  *		value:->	The address to be located.
- * 
+ *
  *		sym:->		A pointer to a structure which will be
  *				loaded with the symbol's parameters.
  *
@@ -413,12 +395,7 @@ static int AddSymbol(line)
  *		closely matching the address is returned.
  **************************************************************************/
 
-extern char * LookupModuleSymbol(value, sym)
-
-	unsigned long value;
-
-	struct symbol *sym;
-	
+char * LookupModuleSymbol(unsigned long value, struct symbol *sym)
 {
 	auto int	nmod,
 			nsym;
@@ -434,7 +411,7 @@ extern char * LookupModuleSymbol(value, sym)
 	sym->offset = 0;
 	if ( num_modules == 0 )
 		return((char *) 0);
-	
+
 	for (nmod = 0; nmod < num_modules; ++nmod)
 	{
 		mp = &sym_array_modules[nmod];
@@ -479,74 +456,6 @@ extern char * LookupModuleSymbol(value, sym)
 }
 
 
-/*
- * Setting the -DTEST define enables the following code fragment to
- * be compiled.  This produces a small standalone program which will
- * dump the current kernel symbol table.
- */
-#if defined(TEST)
-
-#include <stdarg.h>
-
-
-extern int main(int, char **);
-
-
-int main(argc, argv)
-
-	int argc;
-
-	char *argv[];
-
-{
-	auto int lp, syms;
-
-
-	if ( !InitMsyms() )
-	{
-		fprintf(stderr, "Cannot load module symbols.\n");
-		return(1);
-	}
-
-	printf("Number of modules: %d\n\n", num_modules);
-
-	for(lp= 0; lp < num_modules; ++lp)
-	{
-		printf("Module #%d = %s, Number of symbols = %d\n", lp + 1, \
-		       sym_array_modules[lp].name == NULL
-		       ?"kernel space"
-		       :sym_array_modules[lp].name, \
-		       sym_array_modules[lp].num_syms);
-
-		for (syms= 0; syms < sym_array_modules[lp].num_syms; ++syms)
-		{
-			printf("\tSymbol #%d\n", syms + 1);
-			printf("\tName: %s\n", \
-			       sym_array_modules[lp].sym_array[syms].name);
-			printf("\tAddress: %lx\n\n", \
-			       sym_array_modules[lp].sym_array[syms].value);
-		}
-	}
-
-	FreeModules();
-	return(0);
-}
-
-extern void Syslog(int priority, char *fmt, ...)
-
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	fprintf(stdout, "Pr: %d, ", priority);
-	vfprintf(stdout, fmt, ap);
-	va_end(ap);
-	fputc('\n', stdout);
-
-	return;
-}
-
-#endif
 /*
  * Local variables:
  *  c-indent-level: 8
