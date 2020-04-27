@@ -552,9 +552,7 @@ static char sccsid[] = "@(#)syslogd.c	5.27 (Berkeley) 10/10/88";
 #include <pwd.h>
 #include <grp.h>
 
-#ifndef TESTING
 #include "pidfile.h"
-#endif
 #include "version.h"
 #include "attribute.h"
 
@@ -835,9 +833,7 @@ void domark();
 void debug_switch();
 void logerror(const char *type);
 void die(int sig);
-#ifndef TESTING
 void doexit(int sig);
-#endif
 void init();
 void cfline(char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
@@ -954,20 +950,14 @@ static void add_funix_dir(const char *dname)
 	}
 }
 
-int main(argc, argv)
-	int argc;
-	char **argv;
+int main(int argc, char **argv)
 {
 	register int i;
-#ifndef TESTING
 	ssize_t msglen;
-#endif
 #if !defined(__GLIBC__)
 	int len, num_fds;
 #else /* __GLIBC__ */
-#ifndef TESTING
 	socklen_t len;
-#endif
 	int num_fds;
 #endif /* __GLIBC__ */
 	/*
@@ -985,13 +975,11 @@ int main(argc, argv)
 	 */
 	fd_set readfds;
 
-#ifndef TESTING
 	int	fd;
 #ifdef  SYSLOG_INET
 	struct sockaddr_storage frominet;
 #endif
 	pid_t ppid = getpid();
-#endif
 	int ch;
 
 	char line[MAXLINE +1];
@@ -1000,12 +988,11 @@ int main(argc, argv)
 	int maxfds;
 	const char *funix_dir = "/etc/syslog.d";
 
-#ifndef TESTING
 	if (chdir ("/") < 0) {
 		fprintf(stderr, "syslogd: chdir to / failed: %m");
 		exit(1);
 	}
-#endif
+
 	for (i = 1; i < MAXFUNIX; i++) {
 		funixn[i] = "";
 		funix[i]  = -1;
@@ -1100,7 +1087,7 @@ int main(argc, argv)
 	}
 	if (funix_dir && *funix_dir)
 		add_funix_dir(funix_dir);
-#ifndef TESTING
+
 	if ( !(Debug || NoFork) )
 	{
 		dprintf("Checking pidfile.\n");
@@ -1154,10 +1141,8 @@ int main(argc, argv)
 		}
 	}
 	else
-#endif
 		debugging_on = 1;
 
-#ifndef TESTING
 	/* tuck my process id away */
 	if ( !Debug )
 	{
@@ -1180,7 +1165,6 @@ int main(argc, argv)
 			exit(1);
 		}
 	} /* if ( !Debug ) */
-#endif
 
 	consfile.f_type = F_CONSOLE;
 	(void) strcpy(consfile.f_un.f_fname, ctty);
@@ -1207,10 +1191,10 @@ int main(argc, argv)
 	    (char **) 0 )
 	{
 		logerror("Cannot allocate memory for message parts table.");
-#ifndef TESTING
+
 		if (getpid() != ppid)
 			kill (ppid, SIGTERM);
-#endif
+
 		die(0);
 	}
 	for(i= 0; i < num_fds; ++i)
@@ -1218,7 +1202,7 @@ int main(argc, argv)
 
 	dprintf("Starting.\n");
 	init();
-#ifndef TESTING
+
 	if ( Debug )
 	{
 		dprintf("Debugging disabled, SIGUSR1 to turn on debugging.\n");
@@ -1229,7 +1213,6 @@ int main(argc, argv)
 	 */
 	if (getpid() != ppid)
 		kill (ppid, SIGTERM);
-#endif
 
 	if (server_user && drop_root()) {
 		dprintf("syslogd: failed to drop root\n");
@@ -1243,7 +1226,6 @@ int main(argc, argv)
 		FD_ZERO(&readfds);
 		maxfds = 0;
 #ifdef SYSLOG_UNIXAF
-#ifndef TESTING
 		/*
 		 * Add the Unix Domain Sockets to the list of read
 		 * descriptors.
@@ -1256,9 +1238,7 @@ int main(argc, argv)
 			}
 		}
 #endif
-#endif
 #ifdef SYSLOG_INET
-#ifndef TESTING
 		/*
 		 * Add the Internet Domain Socket to the list of read
 		 * descriptors.
@@ -1271,13 +1251,6 @@ int main(argc, argv)
 			}
 			dprintf("Listening on syslog UDP port.\n");
 		}
-#endif
-#endif
-#ifdef TESTING
-		FD_SET(fileno(stdin), &readfds);
-		if (fileno(stdin) > maxfds) maxfds = fileno(stdin);
-
-		dprintf("Listening on stdin.  Press Ctrl-C to interrupt.\n");
 #endif
 
 		if ( debugging_on )
@@ -1318,7 +1291,6 @@ int main(argc, argv)
 			dprintf(("\n"));
 		}
 
-#ifndef TESTING
 #ifdef SYSLOG_UNIXAF
 		for (i = 0; i < nfunix; i++) {
 		    if ((fd = funix[i]) != -1 && FD_ISSET(fd, &readfds)) {
@@ -1367,24 +1339,6 @@ int main(argc, argv)
 				}
 			}
 		}
-#endif
-#else
-		if ( FD_ISSET(fileno(stdin), &readfds) ) {
-			dprintf("Message from stdin.\n");
-			memset(line, '\0', sizeof(line));
-			line[0] = '.';
-			parts[fileno(stdin)] = (char *) 0;
-			i = read(fileno(stdin), line, MAXLINE);
-			if (i > 0) {
-				printchopped(LocalHostName, line, i+1, fileno(stdin));
-		  	} else if (i < 0) {
-		    		if (errno != EINTR) {
-		      			logerror("stdin");
-				}
-		  	}
-			FD_CLR(fileno(stdin), &readfds);
-		  }
-
 #endif
 	}
 }
@@ -2453,22 +2407,20 @@ void die(sig)
         for (i = 0; i < nfunix; i++)
 		if (funixn[i] && funix[i] != -1)
 			(void)unlink(funixn[i]);
-#ifndef TESTING
+
 	(void) remove_pid(PidFile);
-#endif
+
 	exit(0);
 }
 
 /*
  * Signal handler to terminate the parent process.
  */
-#ifndef TESTING
 void doexit(sig)
 	int sig;
 {
 	_exit(0);
 }
-#endif
 
 /*
  *  INIT -- Initialize syslogd from configuration table
@@ -2569,12 +2521,9 @@ void init()
 		dprintf("cannot open %s.\n", ConfFile);
 		allocate_log();
 		f = &Files[lognum++];
-#ifndef TESTING
+
 		cfline("*.err\t" _PATH_CONSOLE, f);
-#else
-		snprintf(cbuf,sizeof(cbuf), "*.*\t%s", ttyname(0));
-		cfline(cbuf, f);
-#endif
+
 		Initialized = 1;
 		return;
 	}

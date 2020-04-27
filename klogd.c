@@ -272,9 +272,7 @@
 #include <grp.h>
 #include "klogd.h"
 #include "ksyms.h"
-#ifndef TESTING
 #include "pidfile.h"
-#endif
 #include "version.h"
 
 #define __LIBRARY__
@@ -294,12 +292,10 @@ _syscall3(int,ksyslog,int, type, char *, buf, int, len);
 #define LOG_BUFFER_SIZE 4096
 #define LOG_LINE_LENGTH 1000
 
-#ifndef TESTING
 #if defined(FSSTND)
 static char	*PidFile = _PATH_VARRUN "klogd.pid";
 #else
 static char	*PidFile = "/etc/klogd.pid";
-#endif
 #endif
 
 static int	kmsg,
@@ -373,7 +369,6 @@ static void CloseLogSrc()
 /*
  * Signal handler to terminate the parent process.
  */
-#ifndef TESTING
 void doexit(sig)
 
 	int sig;
@@ -381,7 +376,6 @@ void doexit(sig)
 {
 	exit (0);
 }
-#endif
 
 void restart(sig)
 	
@@ -447,9 +441,7 @@ static void Terminate()
 	if ( output_file != (FILE *) 0 )
 		fclose(output_file);
 	closelog();
-#ifndef TESTING
 	(void) remove_pid(PidFile);
-#endif
 	exit(1);
 }
 
@@ -458,13 +450,9 @@ static void SignalDaemon(sig)
      int sig;
 
 {
-#ifndef TESTING
 	auto int pid = check_pid(PidFile);
 
 	kill(pid, sig);
-#else
-	kill(getpid(), sig);
-#endif
 	return;
 }
 
@@ -572,7 +560,6 @@ static enum LOGSRC GetKernelLogSrc(void)
 		return(kernel);
 	}
 
-#ifndef TESTING
 	if ( (kmsg = open(_PATH_KLOG, O_RDONLY)) < 0 )
 	{
 		fprintf(stderr, "klogd: Cannot open proc file system, " \
@@ -580,9 +567,6 @@ static enum LOGSRC GetKernelLogSrc(void)
 		ksyslog(7, NULL, 0);
 		exit(1);
 	}
-#else
-	kmsg = fileno(stdin);
-#endif
 
 #ifdef DEBRELEASE
 	Syslog(LOG_INFO, "klogd %s.%s#%s, log source = %s started.", \
@@ -659,18 +643,12 @@ extern void Syslog(int priority, char *fmt, ...)
 		}
 		syslog(priority, fmt, argl);
 		va_end(ap);
-#ifdef TESTING
-		putchar('\n');
-#endif
 		return;
 	}
 
 	va_start(ap, fmt);
 	vsyslog(priority, fmt, ap);
 	va_end(ap);
-#ifdef TESTING
-	printf ("\n");
-#endif
 
 	return;
 }
@@ -1019,13 +997,12 @@ int main(argc, argv)
 	auto char	*log_level = (char *) 0,
 			*output = (char *) 0;
 
-#ifndef TESTING
 	pid_t ppid = getpid();
 	if (chdir ("/") < 0) {
 		fprintf(stderr, "klogd: chdir to / failed: %m");
 		exit(1);
 	}
-#endif
+
 	/* Parse the command-line. */
 	while ((ch = getopt(argc, argv, "c:df:u:j:iIk:nopsvx2")) != EOF)
 		switch((char)ch)
@@ -1097,8 +1074,6 @@ int main(argc, argv)
 		console_log_level = *log_level - '0';
 	}		
 
-
-#ifndef TESTING
 	/*
 	 * The following code allows klogd to auto-background itself.
 	 * What happens is that the program forks and the parent quits.
@@ -1180,7 +1155,6 @@ int main(argc, argv)
 		fputs("klogd: Already running.\n", stderr);
 		Terminate();
 	}
-#endif	
 
 	/* Signal setups. */
 	for (ch= 1; ch < NSIG; ++ch)
@@ -1241,10 +1215,8 @@ int main(argc, argv)
 		}
 	}
 
-#ifndef TESTING
 	if (getpid() != ppid)
 		kill (ppid, SIGTERM);
-#endif
 
 	if (server_user && drop_root()) {
 		syslog(LOG_ALERT, "klogd: failed to drop root");

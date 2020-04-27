@@ -430,10 +430,8 @@ static int CheckVersion(version)
 			minor,
 			patch;
 
-#ifndef TESTING
 	int kvnum;
 	auto struct utsname utsname;
-#endif
 
 	static char *prefix = { "Version_" };
 
@@ -463,7 +461,6 @@ static int CheckVersion(version)
 		       patch);
 	sprintf(vstring, "%d.%d.%d", major, minor, patch);
 
-#ifndef TESTING
 	/*
 	 * We should now have the version string in the vstring variable in
 	 * the same format that it is stored in by the kernel.  We now
@@ -495,7 +492,6 @@ static int CheckVersion(version)
 		return(-1);
 
 	/* Success. */
-#endif
 	return(1);
 }
 

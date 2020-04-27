@@ -89,12 +89,6 @@ klogd:	klogd.o syslog.o pidfile.o ksym.o ksym_mod.o
 syslog_tst: syslog_tst.o
 	${CC} ${LDFLAGS} -o syslog_tst syslog_tst.o
 
-tsyslogd: syslogd.c version.h
-	$(CC) $(SKFLAGS) -g -DTESTING $(SYSLOGD_FLAGS) -o tsyslogd syslogd.c
-
-tklogd: klogd.c syslog.c ksym.c ksym_mod.c version.h
-	$(CC) $(SKFLAGS) -g -DTESTING $(KLOGD_FLAGS) -o tklogd klogd.c syslog.c ksym.c ksym_mod.c
-
 syslogd.o: syslogd.c version.h
 	${CC} ${SKFLAGS} ${SYSLOGD_FLAGS} $(DEB) -c syslogd.c
 
