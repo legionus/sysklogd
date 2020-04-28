@@ -75,16 +75,15 @@ DEB =
 
 all: syslogd klogd
 
-test: syslog_tst ksym oops.ko tsyslogd
+test: syslog_tst oops.ko
 
 install: install_man install_exec
 
 syslogd: syslogd.o pidfile.o
 	${CC} ${LDFLAGS} -o syslogd syslogd.o pidfile.o ${LIBS}
 
-klogd:	klogd.o syslog.o pidfile.o ksym.o ksym_mod.o
-	${CC} ${LDFLAGS} -o klogd klogd.o syslog.o pidfile.o ksym.o \
-		ksym_mod.o ${LIBS}
+klogd:	klogd.o syslog.o pidfile.o
+	${CC} ${LDFLAGS} -o klogd klogd.o syslog.o pidfile.o ${LIBS}
 
 syslog_tst: syslog_tst.o
 	${CC} ${LDFLAGS} -o syslog_tst syslog_tst.o
@@ -98,27 +97,15 @@ syslog.o: syslog.c
 klogd.o: klogd.c klogd.h version.h
 	${CC} ${SKFLAGS} ${KLOGD_FLAGS} $(DEB) -c klogd.c
 
-ksym.o: ksym.c klogd.h ksyms.h module.h
-	${CC} ${SKFLAGS} ${KLOGD_FLAGS} -c ksym.c
-
-ksym_mod.o: ksym_mod.c klogd.h ksyms.h module.h
-	${CC} ${SKFLAGS} ${KLOGD_FLAGS} -c ksym_mod.c
-
 syslog_tst.o: syslog_tst.c
 	${CC} ${SKFLAGS} -c syslog_tst.c
-
-ksym: ksym_test.o ksym_mod.o
-	${CC} ${LDFLAGS} -o ksym ksym_test.o ksym_mod.o
-
-ksym_test.o: ksym.c
-	${CC} ${SKFLAGS} -DTEST -o ksym_test.o -c ksym.c
 
 clean:
 	rm -f *.o *.log *~ *.orig
 	rm -f *.ko oops.mod.* Module.symvers
 
 clobber: clean
-	rm -f syslogd klogd ksym syslog_tst oops_test TAGS tsyslogd tklogd
+	rm -f syslogd klogd syslog_tst oops_test TAGS
 
 install_exec: syslogd klogd
 	${INSTALL} -m 500 -s syslogd ${BINDIR}/syslogd

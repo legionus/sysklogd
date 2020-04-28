@@ -33,7 +33,6 @@
 #include <pwd.h>
 #include <grp.h>
 #include "klogd.h"
-#include "ksyms.h"
 #include "pidfile.h"
 #include "version.h"
 
@@ -62,25 +61,20 @@ static char	*PidFile = "/etc/klogd.pid";
 
 static int	kmsg,
 		change_state = 0,
-		terminate = 0,
 		caught_TSTP = 0,
-		reload_symbols = 0,
 		console_log_level = -1;
 
 static int	use_syscall = 0,
 		one_shot = 0,
-		symbol_lookup = 1,
 		no_fork = 0;	/* don't fork - don't run in daemon mode */
 
-static char	*symfile = (char *) 0,
-		log_buffer[LOG_BUFFER_SIZE];
+static char	log_buffer[LOG_BUFFER_SIZE];
 
 static FILE *output_file = (FILE *) 0;
 
 static enum LOGSRC {none, proc, kernel} logsrc;
 
 int debugging = 0;
-static int symbols_twice = 0;
 
 static char *server_user = NULL;
 static char *chroot_dir = NULL;
@@ -91,7 +85,6 @@ extern int ksyslog(int type, char *buf, int len);
 static void CloseLogSrc(void);
 static void Terminate(void);
 static void SignalDaemon(int);
-static void ReloadSymbols(void);
 static void ChangeLogging(void);
 static enum LOGSRC GetKernelLogSrc(void);
 static void LogLine(char *ptr, int len);
@@ -152,24 +145,19 @@ static void stop_logging(int sig)
 static void stop_daemon(int sig)
 {
 	Terminate();
-	return;
 }
 
 
 static void reload_daemon(int sig)
 {
 	change_state = 1;
-	reload_symbols = 1;
 
 	if ( sig == SIGUSR2 )
 	{
-		++reload_symbols;
 		signal(SIGUSR2, reload_daemon);
 	}
 	else
 		signal(SIGUSR1, reload_daemon);
-
-	return;
 }
 
 
@@ -192,33 +180,11 @@ static void SignalDaemon(int sig)
 }
 
 
-static void ReloadSymbols(void)
-{
-	if (symbol_lookup) {
-		if ( reload_symbols > 1 )
-			InitKsyms(symfile);
-		InitMsyms();
-	}
-	reload_symbols = change_state = 0;
-}
-
-
 static void ChangeLogging(void)
 {
-	/* Terminate kernel logging. */
-	if ( terminate == 1 )
-		Terminate();
-
 	/* Indicate that something is happening. */
 	Syslog(LOG_INFO, "klogd %s.%s, ---------- state change ----------\n", \
 	       VERSION, PATCHLEVEL);
-
-	/* Reload symbols. */
-	if ( reload_symbols > 0 )
-	{
-		ReloadSymbols();
-		return;
-	}
 
 	/* Stop kernel logging. */
 	if ( caught_TSTP == 1 )
@@ -395,44 +361,14 @@ static int copyin( char *line,      int space,
 /*
  * Messages are separated by "\n".  Messages longer than
  * LOG_LINE_LENGTH are broken up.
- *
- * Kernel symbols show up in the input buffer as : "[<aaaaaa>]",
- * where "aaaaaa" is the address.  These are replaced with
- * "[symbolname+offset/size]" in the output line - symbolname,
- * offset, and size come from the kernel symbol table.
- *
- * If a kernel symbol happens to fall at the end of a message close
- * in length to LOG_LINE_LENGTH, the symbol will not be expanded.
- * (This should never happen, since the kernel should never generate
- * messages that long.
- *
- * To preserve the original addresses, lines containing kernel symbols
- * are output twice.  Once with the symbols converted and again with the
- * original text.  Just in case somebody wants to run their own Oops
- * analysis on the syslog, e.g. ksymoops.
  */
 static void LogLine(char *ptr, int len)
 {
-    enum parse_state_enum {
-        PARSING_TEXT,
-        PARSING_SYMSTART,      /* at < */
-        PARSING_SYMBOL,
-        PARSING_SYMEND         /* at ] */
-    };
-
     static char line_buff[LOG_LINE_LENGTH];
+    static char *line = line_buff;
+    static int space = sizeof(line_buff)-1;
 
-    static char *line                        =line_buff;
-    static enum parse_state_enum parse_state = PARSING_TEXT;
-    static int space                         = sizeof(line_buff)-1;
-
-    static char *sym_start;            /* points at the '<' of a symbol */
-
-    auto   int delta = 0;              /* number of chars copied        */
-    auto   int symbols_expanded = 0;   /* 1 if symbols were expanded */
-    auto   int skip_symbol_lookup = 0; /* skip symbol lookup on this pass */
-    auto   char *save_ptr = ptr;       /* save start of input line */
-    auto   int save_len = len;         /* save length at start of input line */
+    int delta = 0; /* number of chars copied        */
 
     while( len > 0 )
     {
@@ -452,16 +388,8 @@ static void LogLine(char *ptr, int len)
             Syslog( LOG_INFO, "%s", line_buff );
             line  = line_buff;
             space = sizeof(line_buff)-1;
-            parse_state = PARSING_TEXT;
-	    symbols_expanded = 0;
-	    skip_symbol_lookup = 0;
-	    save_ptr = ptr;
-	    save_len = len;
         }
 
-        switch( parse_state )
-        {
-        case PARSING_TEXT:
                delta = copyin( line, space, ptr, len, "\n[" );
                line  += delta;
                ptr   += delta;
@@ -470,7 +398,7 @@ static void LogLine(char *ptr, int len)
 
                if( space == 0 || len == 0 )
                {
-		  break;  /* full line_buff or end of input buffer */
+		  continue;  /* full line_buff or end of input buffer */
                }
 
                if( *ptr == '\0' )  /* zero byte */
@@ -479,7 +407,7 @@ static void LogLine(char *ptr, int len)
                   space -= 1;
                   len   -= 1;
 
-		  break;
+		  continue;
 	       }
 
                if( *ptr == '\n' )  /* newline */
@@ -492,133 +420,7 @@ static void LogLine(char *ptr, int len)
 	          Syslog( LOG_INFO, "%s", line_buff );
                   line  = line_buff;
                   space = sizeof(line_buff)-1;
-		  if (symbols_twice) {
-		      if (symbols_expanded) {
-			  /* reprint this line without symbol lookup */
-			  symbols_expanded = 0;
-			  skip_symbol_lookup = 1;
-			  ptr = save_ptr;
-			  len = save_len;
-		      }
-		      else
-		      {
-			  skip_symbol_lookup = 0;
-			  save_ptr = ptr;
-			  save_len = len;
-		      }
-		  }
-                  break;
                }
-               if( *ptr == '[' )   /* possible kernel symbol */
-               {
-                  *line++ = *ptr++;
-                  space -= 1;
-                  len   -= 1;
-	          if (!skip_symbol_lookup)
-                     parse_state = PARSING_SYMSTART;      /* at < */
-                  break;
-               }
-               break;
-        
-        case PARSING_SYMSTART:
-               if( *ptr != '<' )
-               {
-                  parse_state = PARSING_TEXT;        /* not a symbol */
-                  break;
-               }
-
-               /*
-               ** Save this character for now.  If this turns out to
-               ** be a valid symbol, this char will be replaced later.
-               ** If not, we'll just leave it there.
-               */
-
-               sym_start = line; /* this will point at the '<' */
-
-               *line++ = *ptr++;
-               space -= 1;
-               len   -= 1;
-               parse_state = PARSING_SYMBOL;     /* symbol... */
-               break;
-
-        case PARSING_SYMBOL:
-               delta = copyin( line, space, ptr, len, ">\n[" );
-               line  += delta;
-               ptr   += delta;
-               space -= delta;
-               len   -= delta;
-               if( space == 0 || len == 0 )
-               {
-                  break;  /* full line_buff or end of input buffer */
-               }
-               if( *ptr != '>' )
-               {
-                  parse_state = PARSING_TEXT;
-                  break;
-               }
-
-               *line++ = *ptr++;  /* copy the '>' */
-               space -= 1;
-               len   -= 1;
-
-               parse_state = PARSING_SYMEND;
-
-               break;
-
-        case PARSING_SYMEND:
-               if( *ptr != ']' )
-               {
-                  parse_state = PARSING_TEXT;        /* not a symbol */
-                  break;
-               }
-
-               /*
-               ** It's really a symbol!  Replace address with the
-               ** symbol text.
-               */
-           {
-	       auto int sym_space;
-
-	       unsigned long value;
-	       auto struct symbol sym;
-	       auto char *symbol;
-
-               *(line-1) = 0;    /* null terminate the address string */
-               value  = strtoul(sym_start+1, (char **) 0, 16);
-               *(line-1) = '>';  /* put back delim */
-
-               if ( !symbol_lookup || (symbol = LookupSymbol(value, &sym)) == (char *)0 )
-               {
-                  parse_state = PARSING_TEXT;
-                  break;
-               }
-
-               /*
-               ** verify there is room in the line buffer
-               */
-               sym_space = space + ( line - sym_start );
-               if( sym_space < strlen(symbol) + 30 ) /*(30 should be overkill)*/
-               {
-                  parse_state = PARSING_TEXT;  /* not enough space */
-                  break;
-               }
-
-               delta = sprintf( sym_start, "%s+0x%x/0x%02x]",
-                                symbol, sym.offset, sym.size );
-
-               space = sym_space + delta;
-               line  = sym_start + delta;
-	       symbols_expanded = 1;
-           }
-               ptr++;
-               len--;
-               parse_state = PARSING_TEXT;
-               break;
-
-        default: /* Can't get here! */
-               parse_state = PARSING_TEXT;
-
-        }
     }
 
     return;
@@ -718,7 +520,6 @@ int main(int argc, char *argv[])
 		switch((char)ch)
 		{
 		    case '2':		/* Print lines with symbols twice. */
-			symbols_twice = 1;
 			break;
 		    case 'c':		/* Set console message level. */
 			log_level = optarg;
@@ -741,7 +542,6 @@ int main(int argc, char *argv[])
 			log_flags |= LOG_NDELAY;
 			break;
 		    case 'k':		/* Kernel symbol file. */
-			symfile = optarg;
 			break;
 		    case 'n':		/* don't fork */
 			no_fork++;
@@ -750,7 +550,6 @@ int main(int argc, char *argv[])
 			one_shot = 1;
 			break;
 		    case 'p':
-			SetParanoiaLevel(1);	/* Load symbols on oops. */
 			break;
 		    case 's':		/* Use syscall interface. */
 			use_syscall = 1;
@@ -762,7 +561,6 @@ int main(int argc, char *argv[])
 			printf("klogd %s.%s\n", VERSION, PATCHLEVEL);
 			exit (1);
 		    case 'x':
-			symbol_lookup = 0;
 			break;
 		}
 
@@ -898,13 +696,6 @@ int main(int argc, char *argv[])
 	/* Handle one-shot logging. */
 	if ( one_shot )
 	{
-		if (symbol_lookup) {
-			symbol_lookup  = (InitKsyms(symfile) == 1);
-			symbol_lookup |= InitMsyms();
-			if (symbol_lookup == 0) {
-				Syslog(LOG_WARNING, "cannot find any symbols, turning off symbol lookups\n");
-			}
-		}
 		if ( (logsrc = GetKernelLogSrc()) == kernel )
 			LogKernelLine();
 		else
@@ -917,13 +708,6 @@ int main(int argc, char *argv[])
 	sleep(KLOGD_DELAY);
 #endif
 	logsrc = GetKernelLogSrc();
-	if (symbol_lookup) {
-		symbol_lookup  = (InitKsyms(symfile) == 1);
-		symbol_lookup |= InitMsyms();
-		if (symbol_lookup == 0) {
-			Syslog(LOG_WARNING, "cannot find any symbols, turning off symbol lookups\n");
-		}
-	}
 
 	if (getpid() != ppid)
 		kill (ppid, SIGTERM);
@@ -941,12 +725,12 @@ int main(int argc, char *argv[])
 		switch ( logsrc )
 		{
 			case kernel:
-	  			LogKernelLine();
+				LogKernelLine();
 				break;
 			case proc:
 				LogProcLine();
 				break;
-		        case none:
+			case none:
 				pause();
 				break;
 		}

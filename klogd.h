@@ -19,13 +19,6 @@
     Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
-/*
- * Symbols and definitions needed by klogd.
- *
- * Thu Nov 16 12:45:06 CST 1995:  Dr. Wettstein
- *	Initial version.
- */
-
 /* Useful include files. */
 #include <stdio.h>
 #include <syslog.h>
@@ -36,9 +29,5 @@
 #undef vsyslog
 
 /* Function prototypes. */
-extern int InitKsyms(char *);
-extern int InitMsyms(void);
-extern char * ExpandKadds(char *, char *);
-extern void SetParanoiaLevel(int);
 extern void Syslog(int priority, char *fmt, ...)
 	SYSKLOGD_FORMAT((__printf__, 2, 3)) SYSKLOGD_NONNULL((2));
