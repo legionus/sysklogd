@@ -95,19 +95,19 @@ extern int main(int argc, char *argv[]);
 
 static void CloseLogSrc(void)
 {
-        /* Shutdown the log sources. */
+	/* Shutdown the log sources. */
 	switch ( logsrc )
 	{
-	    case kernel:
-		ksyslog(0, 0, 0);
-		Syslog(LOG_INFO, "Kernel logging (ksyslog) stopped.");
-		break;
-            case proc:
-		close(kmsg);
-		Syslog(LOG_INFO, "Kernel logging (proc) stopped.");
-		break;
-	    case none:
-		break;
+		case kernel:
+			ksyslog(0, 0, 0);
+			Syslog(LOG_INFO, "Kernel logging (ksyslog) stopped.");
+			break;
+		case proc:
+			close(kmsg);
+			Syslog(LOG_INFO, "Kernel logging (proc) stopped.");
+			break;
+		case none:
+			break;
 	}
 
 	if ( output_file != (FILE *) 0 )
@@ -153,9 +153,7 @@ static void reload_daemon(int sig)
 	change_state = 1;
 
 	if ( sig == SIGUSR2 )
-	{
 		signal(SIGUSR2, reload_daemon);
-	}
 	else
 		signal(SIGUSR1, reload_daemon);
 }
@@ -244,8 +242,8 @@ static enum LOGSRC GetKernelLogSrc(void)
 	    (use_syscall ||
 	    ((stat(_PATH_KLOG, &sb) < 0) && (errno == ENOENT))))
 	{
-	  	/* Initialize kernel logging. */
-	  	ksyslog(1, NULL, 0);
+		/* Initialize kernel logging. */
+		ksyslog(1, NULL, 0);
 		Syslog(LOG_INFO, "klogd %s.%s, log source = ksyslog "
 		       "started.", VERSION, PATCHLEVEL);
 		return(kernel);
@@ -348,14 +346,16 @@ static int copyin( char *line,      int space,
                    const char *ptr, int len,
                    const char *delim )
 {
-    auto int i;
-    auto int count;
+	auto int i;
+	auto int count;
 
-    count = len < space ? len : space;
+	count = len < space ? len : space;
 
-    for(i=0; i<count && !strchr(delim, *ptr); i++ ) { *line++ = *ptr++; }
+	for(i = 0; i < count && !strchr(delim, *ptr); i++ ) {
+		*line++ = *ptr++;
+	}
 
-    return( i );
+	return i;
 }
 
 /*
@@ -364,66 +364,66 @@ static int copyin( char *line,      int space,
  */
 static void LogLine(char *ptr, int len)
 {
-    static char line_buff[LOG_LINE_LENGTH];
-    static char *line = line_buff;
-    static int space = sizeof(line_buff)-1;
+	static char line_buff[LOG_LINE_LENGTH];
+	static char *line = line_buff;
+	static int space = sizeof(line_buff)-1;
 
-    int delta = 0; /* number of chars copied        */
+	int delta = 0; /* number of chars copied        */
 
-    while( len > 0 )
-    {
-        if( space == 0 )    /* line buffer is full */
-        {
-            /*
-            ** Line too long.  Start a new line.
-            */
-            *line = 0;   /* force null terminator */
+	while( len > 0 )
+	{
+		if( space == 0 )    /* line buffer is full */
+		{
+			/*
+			 ** Line too long.  Start a new line.
+			 */
+			*line = 0;   /* force null terminator */
 
-	    if ( debugging )
-	    {
-		fputs("Line buffer full:\n", stderr);
-		fprintf(stderr, "\tLine: %s\n", line);
-	    }
+			if ( debugging )
+			{
+				fputs("Line buffer full:\n", stderr);
+				fprintf(stderr, "\tLine: %s\n", line);
+			}
 
-            Syslog( LOG_INFO, "%s", line_buff );
-            line  = line_buff;
-            space = sizeof(line_buff)-1;
-        }
+			Syslog( LOG_INFO, "%s", line_buff );
+			line  = line_buff;
+			space = sizeof(line_buff)-1;
+		}
 
-               delta = copyin( line, space, ptr, len, "\n[" );
-               line  += delta;
-               ptr   += delta;
-               space -= delta;
-               len   -= delta;
+		delta = copyin( line, space, ptr, len, "\n[" );
+		line  += delta;
+		ptr   += delta;
+		space -= delta;
+		len   -= delta;
 
-               if( space == 0 || len == 0 )
-               {
-		  continue;  /* full line_buff or end of input buffer */
-               }
+		if( space == 0 || len == 0 )
+		{
+			continue;  /* full line_buff or end of input buffer */
+		}
 
-               if( *ptr == '\0' )  /* zero byte */
-               {
-                  ptr++;	/* skip zero byte */
-                  space -= 1;
-                  len   -= 1;
+		if( *ptr == '\0' )  /* zero byte */
+		{
+			ptr++;	/* skip zero byte */
+			space -= 1;
+			len   -= 1;
 
-		  continue;
-	       }
+			continue;
+		}
 
-               if( *ptr == '\n' )  /* newline */
-               {
-                  ptr++;	/* skip newline */
-                  space -= 1;
-                  len   -= 1;
+		if( *ptr == '\n' )  /* newline */
+		{
+			ptr++;	/* skip newline */
+			space -= 1;
+			len   -= 1;
 
-                  *line = 0;  /* force null terminator */
-	          Syslog( LOG_INFO, "%s", line_buff );
-                  line  = line_buff;
-                  space = sizeof(line_buff)-1;
-               }
-    }
+			*line = 0;  /* force null terminator */
+			Syslog( LOG_INFO, "%s", line_buff );
+			line  = line_buff;
+			space = sizeof(line_buff)-1;
+		}
+	}
 
-    return;
+	return;
 }
 
 
