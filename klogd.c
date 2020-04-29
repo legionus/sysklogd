@@ -390,40 +390,33 @@ static void LogLine(char *ptr, int len)
 			space = sizeof(line_buff)-1;
 		}
 
-		delta = copyin( line, space, ptr, len, "\n[" );
+		delta = copyin(line, space, ptr, len, "\n");
 		line  += delta;
 		ptr   += delta;
 		space -= delta;
 		len   -= delta;
 
 		if( space == 0 || len == 0 )
-		{
-			continue;  /* full line_buff or end of input buffer */
-		}
-
-		if( *ptr == '\0' )  /* zero byte */
+			; /* full line_buff or end of input buffer */
+		else if( *ptr == '\0' )  /* zero byte */
 		{
 			ptr++;	/* skip zero byte */
 			space -= 1;
 			len   -= 1;
-
-			continue;
 		}
-
-		if( *ptr == '\n' )  /* newline */
+		else if( *ptr == '\n' )  /* newline */
 		{
 			ptr++;	/* skip newline */
 			space -= 1;
 			len   -= 1;
 
 			*line = 0;  /* force null terminator */
+
 			Syslog( LOG_INFO, "%s", line_buff );
 			line  = line_buff;
 			space = sizeof(line_buff)-1;
 		}
 	}
-
-	return;
 }
 
 

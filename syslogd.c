@@ -1809,7 +1809,7 @@ void debug_switch(int sig)
  */
 void logerror(const char *type)
 {
-	char buf[100];
+	char buf[BUFSIZ];
 
 	verbosef("Called logerr, msg: %s\n", type);
 
@@ -2130,7 +2130,7 @@ void cfline(char *line, struct filed *f)
 	struct addrinfo hints, *ai;
 #endif
 	char buf[MAXLINE];
-	char xbuf[200];
+	char xbuf[BUFSIZ];
 
 	verbosef("cfline(%s)\n", line);
 
