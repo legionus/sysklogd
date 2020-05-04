@@ -1,4 +1,4 @@
- Next release
+Version 1.6.0
 
  . Alexey Gladkov <gladkov.alexey@gmail.com>
    - syslogd: Add -c option to do not compress repeated messages.
