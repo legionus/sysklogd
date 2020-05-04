@@ -20,7 +20,7 @@
 CC= gcc
 #SKFLAGS= -g -Wall
 #LDFLAGS= -g
-SKFLAGS= $(RPM_OPT_FLAGS) -O3 -fomit-frame-pointer -Wall -fno-strength-reduce
+SKFLAGS= $(RPM_OPT_FLAGS) -D_GNU_SOURCE -O3 -fomit-frame-pointer -Wall -fno-strength-reduce
 # -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 # -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE
 # $(shell getconf LFS_SKFLAGS)

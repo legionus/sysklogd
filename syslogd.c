@@ -277,6 +277,19 @@ static struct code FacNames[] = {
 	{NULL,           -1},
 };
 
+#define SINFO_ISINTERNAL 0x01
+#define SINFO_HAVECRED   0x02
+#define SINFO_KLOG       0x04
+#define SINFO_TIMESTAMP  0x08
+
+struct sourceinfo {
+	char	*hostname;
+	uid_t	uid;
+	gid_t	gid;
+	pid_t	pid;
+	unsigned int flags;
+} sinfo;
+
 static int	Debug;			/* debug flag */
 static int	Compress = 1;		/* compress repeated messages flag */
 static char	LocalHostName[MAXHOSTNAMELEN+1];	/* our hostname */
@@ -315,10 +328,10 @@ int main(int argc, char **argv);
 char **crunch_list(char *list);
 int usage(void);
 void untty(void);
-void printchopped(const char *hname, char *msg, size_t len, int fd);
-void printline(const char *hname, char *msg);
+void printchopped(const struct sourceinfo* const, char *msg, size_t len, int fd);
+void printline(const struct sourceinfo* const, char *msg);
 void printsys(char *msg);
-void logmsg(int pri, char *msg, const char *from, int flags);
+void logmsg(int pri, char *msg, const struct sourceinfo* const, int flags);
 void fprintlog(register struct filed *f, char *from, int flags, char *msg);
 void endtty(int);
 void wallmsg(register struct filed *f, struct iovec *iov, size_t iovsz);
@@ -344,6 +357,55 @@ static int create_unix_socket(const char *path);
 #ifdef SYSLOG_INET
 static int *create_inet_sockets();
 #endif
+
+static ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
+		pid_t *pid, uid_t *uid, gid_t *gid)
+{
+	struct cmsghdr *cmptr;
+	struct msghdr m;
+	struct iovec iov;
+	char control[CMSG_SPACE(sizeof(struct ucred))];
+	size_t rc;
+
+	memset(&m, 0, sizeof(m));
+	memset(control, 0, sizeof(control));
+
+	iov.iov_base = (char *) buf;
+	iov.iov_len  = len;
+
+	m.msg_iov = &iov;
+	m.msg_iovlen = 1;
+	m.msg_control = control;
+	m.msg_controllen = sizeof(control);
+
+	if ((rc = recvmsg(s, &m, flags)) < 0)
+		return rc;
+
+#ifdef SCM_CREDENTIALS
+	if (!(m.msg_flags & MSG_CTRUNC) &&
+			(cmptr = (m.msg_controllen >= sizeof(struct cmsghdr)) ?
+			 CMSG_FIRSTHDR(&m) : NULL)
+			&& (cmptr->cmsg_level == SOL_SOCKET)
+			&& (cmptr->cmsg_type == SCM_CREDENTIALS)) {
+		if (pid)
+			*pid = ((struct ucred *) CMSG_DATA(cmptr))->pid;
+		if (uid)
+			*uid = ((struct ucred *) CMSG_DATA(cmptr))->uid;
+		if (gid)
+			*gid = ((struct ucred *) CMSG_DATA(cmptr))->gid;
+	} else
+#endif
+	{
+		if (pid)
+			*pid = (pid_t) -1;
+		if (uid)
+			*uid = (uid_t) -1;
+		if (gid)
+			*gid = (gid_t) -1;
+	}
+
+	return rc;
+}
 
 static int set_nonblock_flag(int desc)
 {
@@ -783,12 +845,23 @@ int main(int argc, char **argv)
 #ifdef SYSLOG_UNIXAF
 		for (i = 0; i < nfunix; i++) {
 		    if ((fd = funix[i]) != -1 && FD_ISSET(fd, &readfds)) {
+			memset(&sinfo, '\0', sizeof(sinfo));
 			memset(line, 0, sizeof(line));
-			msglen = recv(fd, line, MAXLINE - 2, 0);
+
+			msglen = recv_withcred(fd, line, MAXLINE - 2, 0,
+					&sinfo.pid, &sinfo.uid, &sinfo.gid);
+
 			verbosef("Message from UNIX socket: #%d\n", fd);
-			if (msglen > 0)
-				printchopped(LocalHostName, line, msglen + 2,  fd);
-			else if (msglen < 0 && errno != EINTR) {
+
+			if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
+				logerror("error - credentials not provided");
+			else
+				sinfo.flags = SINFO_HAVECRED;
+
+			if (msglen > 0) {
+				sinfo.hostname = LocalHostName;
+				printchopped(&sinfo, line, msglen + 2, fd);
+			} else if (msglen < 0 && errno != EINTR) {
 				verbosef("UNIX socket error: %d = %s.\n", \
 					errno, strerror(errno));
 				logerror("recvfrom UNIX");
@@ -803,6 +876,7 @@ int main(int argc, char **argv)
 				if (finet[i+1] != -1 && FD_ISSET(finet[i+1], &readfds)) {
 					len = sizeof(frominet);
 					memset(line, 0, sizeof(line));
+					memset(&sinfo, '\0', sizeof(sinfo));
 					msglen = recvfrom(finet[i+1], line, MAXLINE - 2, 0, \
 						     (struct sockaddr *) &frominet, &len);
 					if (Debug) {
@@ -813,10 +887,9 @@ int main(int argc, char **argv)
 					if (msglen > 0) {
 						/* Note that if cvthname() returns NULL then
 						   we shouldn't attempt to log the line -- jch */
-						const char *from = cvthname(&frominet, len);
-						if (from)
-							printchopped(from, line,
-								     msglen + 2,  finet[i+1]);
+						sinfo.hostname = (char *)cvthname(&frominet, len);
+						printchopped(&sinfo, line,
+								msglen + 2, finet[i+1]);
 					} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
 						verbosef("INET socket error: %d = %s.\n", \
 							errno, strerror(errno));
@@ -845,6 +918,8 @@ static int create_unix_socket(const char *path)
 	struct sockaddr_un sunx;
 	int fd;
 	char line[MAXLINE +1];
+	int passcred = 1;
+	socklen_t sl = sizeof(passcred);
 
 	if (path[0] == '\0')
 		return -1;
@@ -864,6 +939,7 @@ static int create_unix_socket(const char *path)
 		close(fd);
 		return -1;
 	}
+	setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &passcred, sl);
 	return fd;
 }
 #endif
@@ -1011,7 +1087,7 @@ void untty(void)
  * than one message.
  */
 
-void printchopped(const char *hname, char *msg, size_t len, int fd)
+void printchopped(const struct sourceinfo *const source, char *msg, size_t len, int fd)
 {
 	auto int ptlngth;
 
@@ -1031,7 +1107,7 @@ void printchopped(const char *hname, char *msg, size_t len, int fd)
 		if ( (strlen(msg) + strlen(tmpline)) > MAXLINE )
 		{
 			logerror("Cannot glue message parts together");
-			printline(hname, tmpline);
+			printline(source, tmpline);
 			start = msg;
 		}
 		else
@@ -1039,7 +1115,7 @@ void printchopped(const char *hname, char *msg, size_t len, int fd)
 			verbosef("Previous: %s\n", tmpline);
 			verbosef("Next: %s\n", msg);
 			strcat(tmpline, msg);	/* length checked above */
-			printline(hname, tmpline);
+			printline(source, tmpline);
 			if ( (strlen(msg) + 1) == len )
 				return;
 			else
@@ -1066,7 +1142,7 @@ void printchopped(const char *hname, char *msg, size_t len, int fd)
 
 	do {
 		end = strchr(start + 1, '\0');
-		printline(hname, start);
+		printline(source, start);
 		start = end + 1;
 	} while ( *start != '\0' );
 
@@ -1080,7 +1156,7 @@ void printchopped(const char *hname, char *msg, size_t len, int fd)
  * on the appropriate log files.
  */
 
-void printline(const char *hname, char *msg)
+void printline(const struct sourceinfo *const source, char *msg)
 {
 	register char *p, *q;
 	register unsigned char c;
@@ -1127,7 +1203,7 @@ void printline(const char *hname, char *msg)
 	}
 	*q = '\0';
 
-	logmsg(pri, line, hname, SYNC_FILE);
+	logmsg(pri, line, source, SYNC_FILE);
 	return;
 }
 
@@ -1144,6 +1220,11 @@ void printsys(char *msg)
 	char line[MAXLINE + 1];
 	int pri, flags;
 	char *lp;
+	struct sourceinfo source;
+
+	memset(&source, '\0', sizeof(source));
+	source.flags = SINFO_KLOG;
+	source.hostname = LocalHostName;
 
 	(void) snprintf(line, sizeof(line), "vmunix: ");
 	lp = line + strlen(line);
@@ -1167,7 +1248,7 @@ void printsys(char *msg)
 		    q < &line[MAXLINE])
 			*q++ = c;
 		*q = '\0';
-		logmsg(pri, line, LocalHostName, flags);
+		logmsg(pri, line, &source, flags);
 	}
 	return;
 }
@@ -1195,15 +1276,16 @@ static time_t now;
  * the priority.
  */
 
-void logmsg(int pri, char *msg, const char *from, int flags)
+void logmsg(int pri, char *msg, const struct sourceinfo * const from, int flags)
 {
 	register struct filed *f;
 	int fac, prilev, lognum;
 	int msglen;
 	char *timestamp;
+	char newmsg[MAXLINE + 1];
 	sigset_t mask;
 
-	verbosef("logmsg: %s, flags %x, from %s, msg %s\n", textpri(pri), flags, from, msg);
+	verbosef("logmsg: %s, flags %x, from %s, msg %s\n", textpri(pri), flags, from->hostname, msg);
 
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGHUP);
@@ -1235,6 +1317,82 @@ void logmsg(int pri, char *msg, const char *from, int flags)
 	fac = LOG_FAC(pri);
 	prilev = LOG_PRI(pri);
 
+	/*
+	 * If we have credentials info, let's validate program name and pid.
+	 * We follow RFC 3164 section 4.1 and take process name (TAG) to
+	 * be 32 characters or less, terminated with ':' or '[',
+	 * but, unlike stated in the document, we tolerate non-alphanumeric
+	 * characters (which restriction is probably just a mistake,
+	 * as '-' sign is quite common) and spaces (LPRng daemons are said
+	 * to have space in the name).
+	 */
+	if (from->flags & SINFO_HAVECRED) { /* XXX: should log error on no creds? */
+		char tag[32 + 10]; /* rfc3164 tag+brackets+pid+colon+space+0 */
+		char *p;
+		char *oldpid;
+
+		newmsg[0] = '\0';
+
+		tag[0] = '\0';
+		strncat(tag, msg, sizeof(tag) - 1);
+
+		p = strchr(tag, ':');
+		if (!(oldpid = strchr(tag, '[')) || (p && p < oldpid)) {
+			/* We do not have valid pid in tag, skip to tag end */
+			if (p || (p = strchr(tag, ' '))) {
+				*p = '\0';
+				msg += (p + 1 - tag);
+				while (*msg == ' ')
+					msg++;
+				/* ..and add one */
+			        snprintf(newmsg, sizeof(newmsg),
+					 "%s[%u]: ", tag, from->pid);
+			} else {
+				/* Yes, it is safe to call logerror() from this
+				   part of logmsg().  Complain about tag being
+				   invalid */
+				logerror("credentials processing failed -- "
+					 "received malformed message");
+				goto finish;
+			}
+		} else {
+			/* As we have pid, validate it */
+			if ((p = strchr(tag, ']'))) {
+				*p = '\0';
+				msg += (p + 1 - tag);
+				if (*msg == ':')
+					msg++;
+				while (*msg == ' ')
+					msg++;
+			} else {
+				logerror("credentials processing failed -- "
+					 "received malformed message");
+				goto finish;
+			}
+			*oldpid++ = '\0';
+			/* XXX: We could use strtoul() here for full
+			   error checking. */
+			if ((pid_t) atoi(oldpid) != from->pid) {
+				logerror("malformed or spoofed pid detected!");
+			        snprintf(newmsg, sizeof(newmsg),
+					 "%s[%s!=%u]: ",
+					 tag, oldpid, from->pid);
+			} else
+			        snprintf(newmsg, sizeof(newmsg),
+					 "%s[%u]: ", tag, from->pid);
+		}
+		/* We may place group membership check here */
+		if (from->uid != 0) {
+			int newlen = strlen(newmsg);
+			snprintf(newmsg + newlen, sizeof(newmsg) - newlen,
+			        "(uid=%u) ", from->uid);
+		}
+		/* XXX: Silent truncation is possible */
+		strncat(newmsg, msg, sizeof(newmsg) - 1 - strlen(newmsg));
+		msg = newmsg;
+		msglen = strlen(msg);
+	}
+
 	/* log the message to the particular outputs */
 	if (!Initialized) {
 		f = &consfile;
@@ -1242,7 +1400,7 @@ void logmsg(int pri, char *msg, const char *from, int flags)
 
 		if (f->f_file >= 0) {
 			untty();
-			fprintlog(f, (char *)from, flags, msg);
+			fprintlog(f, (char *)from->hostname, flags, msg);
 			(void) close(f->f_file);
 			f->f_file = -1;
 		}
@@ -1270,7 +1428,7 @@ void logmsg(int pri, char *msg, const char *from, int flags)
 		 */
 		if (Compress && (flags & MARK) == 0 && msglen == f->f_prevlen &&
 		    !strcmp(msg, f->f_prevline) &&
-		    !strcmp(from, f->f_prevhost)) {
+		    !strcmp(from->hostname, f->f_prevhost)) {
 			(void) strncpy(f->f_lasttime, timestamp, 15);
 			f->f_prevcount++;
 			verbosef("msg repeated %d times, %ld sec of %ld.\n",
@@ -1296,13 +1454,13 @@ void logmsg(int pri, char *msg, const char *from, int flags)
 			 * in the future.
 			 */
 			if (now > REPEATTIME(f)) {
-				fprintlog(f, (char *)from, flags, (char *)NULL);
+				fprintlog(f, (char *)from->hostname, flags, (char *)NULL);
 				BACKOFF(f);
 			}
 		} else {
 			/* new line, save it */
 			if (f->f_prevcount) {
-				fprintlog(f, (char *)from, 0, (char *)NULL);
+				fprintlog(f, (char *)from->hostname, 0, (char *)NULL);
 
 				if (--DupesPending == 0) {
 					verbosef("unsetting duplicate message flush alarm\n");
@@ -1315,19 +1473,20 @@ void logmsg(int pri, char *msg, const char *from, int flags)
 			f->f_prevpri = pri;
 			f->f_repeatcount = 0;
 			(void) strncpy(f->f_lasttime, timestamp, 15);
-			(void) strncpy(f->f_prevhost, from,
+			(void) strncpy(f->f_prevhost, from->hostname,
 					sizeof(f->f_prevhost));
 			if (msglen < MAXSVLINE) {
 				f->f_prevlen = msglen;
 				(void) strcpy(f->f_prevline, msg);
-				fprintlog(f, (char *)from, flags, (char *)NULL);
+				fprintlog(f, (char *)from->hostname, flags, (char *)NULL);
 			} else {
 				f->f_prevline[0] = 0;
 				f->f_prevlen = 0;
-				fprintlog(f, (char *)from, flags, msg);
+				fprintlog(f, (char *)from->hostname, flags, msg);
 			}
 		}
 	}
+finish:
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
 }
 
@@ -1765,12 +1924,18 @@ void domark(int sig)
 {
 	register struct filed *f;
 	int lognum;
+	struct sourceinfo source;
+
+	memset(&source, '\0', sizeof(source));
+
+	source.flags = SINFO_ISINTERNAL;
+	source.hostname = LocalHostName;
 
 	if (MarkInterval > 0) {
 		now = time(NULL);
 		MarkSeq += LastAlarm;
 		if (MarkSeq >= MarkInterval) {
-			logmsg(LOG_MARK|LOG_INFO, "-- MARK --", LocalHostName, ADDDATE|MARK);
+			logmsg(LOG_MARK|LOG_INFO, "-- MARK --", &source, ADDDATE|MARK);
 			MarkSeq -= MarkInterval;
 		}
 	}
@@ -1810,6 +1975,12 @@ void debug_switch(int sig)
 void logerror(const char *type)
 {
 	char buf[BUFSIZ];
+	struct sourceinfo source;
+
+	memset(&source, '\0', sizeof(source));
+
+	source.flags = SINFO_ISINTERNAL;
+	source.hostname = LocalHostName;
 
 	verbosef("Called logerr, msg: %s\n", type);
 
@@ -1818,7 +1989,7 @@ void logerror(const char *type)
 	else
 		(void) snprintf(buf, sizeof(buf), "syslogd: %s: %s", type, strerror(errno));
 	errno = 0;
-	logmsg(LOG_SYSLOG|LOG_ERR, buf, LocalHostName, ADDDATE);
+	logmsg(LOG_SYSLOG|LOG_ERR, buf, &source, ADDDATE);
 	return;
 }
 
@@ -1829,6 +2000,12 @@ void die(int sig)
 	int lognum;
 	int i;
 	int was_initialized = Initialized;
+	struct sourceinfo source;
+
+	memset(&source, '\0', sizeof(source));
+
+	source.flags = SINFO_ISINTERNAL;
+	source.hostname = LocalHostName;
 
 	Initialized = 0;	/* Don't log SIGCHLDs in case we
 				   receive one during exiting */
@@ -1845,7 +2022,7 @@ void die(int sig)
 		verbosef("syslogd: exiting on signal %d\n", sig);
 		(void) snprintf(buf, sizeof(buf), "exiting on signal %d", sig);
 		errno = 0;
-		logmsg(LOG_SYSLOG|LOG_INFO, buf, LocalHostName, ADDDATE);
+		logmsg(LOG_SYSLOG|LOG_INFO, buf, &source, ADDDATE);
 	}
 
 	/* Close the UNIX sockets. */
@@ -1891,6 +2068,12 @@ void init(void)
 	char cbuf[BUFSIZ];
 	char *cline;
 	struct hostent *hent;
+	struct sourceinfo source;
+
+	memset(&source, '\0', sizeof(source));
+
+	source.flags = SINFO_ISINTERNAL;
+	source.hostname = LocalHostName;
 
 	/*
 	 *  Close all open log files and free log descriptor array.
@@ -1951,7 +2134,7 @@ void init(void)
 		 * Good software also always checks its return values...
 		 * If syslogd starts up before DNS is up & /etc/hosts
 		 * doesn't have LocalHostName listed, gethostbyname will
-		 * return NULL. 
+		 * return NULL.
 		 */
 		hent = gethostbyname(LocalHostName);
 		if ( hent )
@@ -2103,10 +2286,10 @@ void init(void)
 
 	if ( AcceptRemote )
 		logmsg(LOG_SYSLOG|LOG_INFO, "syslogd " VERSION "." PATCHLEVEL \
-		       ": restart (remote reception)." , LocalHostName, ADDDATE);
+		       ": restart (remote reception)." , &source, ADDDATE);
 	else
 		logmsg(LOG_SYSLOG|LOG_INFO, "syslogd " VERSION "." PATCHLEVEL \
-		       ": restart." , LocalHostName, ADDDATE);
+		       ": restart." , &source, ADDDATE);
 
 	(void) signal(SIGHUP, sighup_handler);
 	verbosef("syslogd: restarted.\n");
