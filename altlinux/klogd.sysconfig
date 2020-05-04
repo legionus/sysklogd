@@ -1,0 +1,8 @@
+# Options to klogd
+# -c n	Sets the default log level of console messages to n.
+# -2	Prints all kernel oops messages twice; once for klogd to decode, and
+#	once for processing with 'ksymoops'.
+# -x	Sisables all klogd processing of oops messages entirely.
+#
+# See klogd(8) for more details.
+KLOGD_OPTIONS='-c 1 -x -u klogd -j /var/lib/klogd'

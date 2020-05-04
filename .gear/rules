@@ -1,0 +1,6 @@
+copy: altlinux/*.conf
+copy: altlinux/*.init
+copy: altlinux/*.patch
+copy: altlinux/*.sysconfig
+spec: altlinux/sysklogd.spec
+tar: .

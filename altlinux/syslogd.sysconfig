@@ -1,0 +1,7 @@
+# Options to syslogd
+# -m 0	Disables 'MARK' messages.
+# -r	Enables logging from remote machines.
+# -x	Disables DNS lookups on messages recieved with -r.
+#
+# See syslogd(8) for more details.
+SYSLOGD_OPTIONS='-u syslogd -j /var/resolv'
