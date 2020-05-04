@@ -40,8 +40,6 @@ syslog.conf:	A sample configuration file.  Note that this file uses
 		extensions to the BSD syntax.  See the syslog.conf(5)
 		manpage for more details.
 
-syslog_tst.c:	A simple program to test the system log utility.
-
 sysklogd.8:	Man page documenting the general characteristics of this
 		package.
 

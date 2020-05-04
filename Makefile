@@ -85,9 +85,6 @@ syslogd: syslogd.o pidfile.o
 klogd:	klogd.o syslog.o pidfile.o
 	${CC} ${LDFLAGS} -o klogd klogd.o syslog.o pidfile.o ${LIBS}
 
-syslog_tst: syslog_tst.o
-	${CC} ${LDFLAGS} -o syslog_tst syslog_tst.o
-
 syslogd.o: syslogd.c version.h
 	${CC} ${SKFLAGS} ${SYSLOGD_FLAGS} $(DEB) -c syslogd.c
 
@@ -97,15 +94,12 @@ syslog.o: syslog.c
 klogd.o: klogd.c klogd.h version.h
 	${CC} ${SKFLAGS} ${KLOGD_FLAGS} $(DEB) -c klogd.c
 
-syslog_tst.o: syslog_tst.c
-	${CC} ${SKFLAGS} -c syslog_tst.c
-
 clean:
 	rm -f *.o *.log *~ *.orig
 	rm -f *.ko oops.mod.* Module.symvers
 
 clobber: clean
-	rm -f syslogd klogd syslog_tst oops_test TAGS
+	rm -f syslogd klogd TAGS
 
 install_exec: syslogd klogd
 	${INSTALL} -m 500 -s syslogd ${BINDIR}/syslogd
