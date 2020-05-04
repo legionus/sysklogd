@@ -18,7 +18,6 @@
 #define	MAXLINE		1024		/* maximum line length */
 #define	MAXSVLINE	240		/* maximum saved line length */
 #define DEFUPRI		(LOG_USER|LOG_NOTICE)
-#define DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define TIMERINTVL	30		/* interval for checking flush, mark */
 
 #include <unistd.h>
@@ -330,7 +329,6 @@ int usage(void);
 void untty(void);
 void printchopped(const struct sourceinfo* const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo* const, char *msg);
-void printsys(char *msg);
 void logmsg(int pri, char *msg, const struct sourceinfo* const, int flags);
 void fprintlog(register struct filed *f, char *from, int flags, char *msg);
 void endtty(int);
@@ -1207,51 +1205,6 @@ void printline(const struct sourceinfo *const source, char *msg)
 	return;
 }
 
-
-
-/*
- * Take a raw input line from /dev/klog, split and format similar to syslog().
- */
-
-void printsys(char *msg)
-{
-	register char *p, *q;
-	register int c;
-	char line[MAXLINE + 1];
-	int pri, flags;
-	char *lp;
-	struct sourceinfo source;
-
-	memset(&source, '\0', sizeof(source));
-	source.flags = SINFO_KLOG;
-	source.hostname = LocalHostName;
-
-	(void) snprintf(line, sizeof(line), "vmunix: ");
-	lp = line + strlen(line);
-	for (p = msg; *p != '\0'; ) {
-		flags = ADDDATE;
-		pri = DEFSPRI;
-		if (*p == '<') {
-			pri = 0;
-			while (isdigit(*++p))
-				pri = 10 * pri + (*p - '0');
-			if (*p == '>')
-				++p;
-		} else {
-			/* kernel printf's come out on console */
-			flags |= IGN_CONS;
-		}
-		if (pri &~ (LOG_FACMASK|LOG_PRIMASK))
-			pri = DEFSPRI;
-		q = lp;
-		while (*p != '\0' && (c = *p++) != '\n' &&
-		    q < &line[MAXLINE])
-			*q++ = c;
-		*q = '\0';
-		logmsg(pri, line, &source, flags);
-	}
-	return;
-}
 
 /*
  * Decode a priority into textual information like auth.emerg.
