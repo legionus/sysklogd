@@ -1,12 +1,35 @@
+ Next release
+
+ . Alexey Gladkov <gladkov.alexey@gmail.com>
+   - syslogd: Add -c option to do not compress repeated messages.
+   - syslogd, klogd: Drop obsolete code (SYSV, TESTING, etc.).
+   - klogd: Drop obsolete kernel symbols resolution because the linux kernel
+     can do this for a long time.
+
+ . Dmitry V. Levin <ldv@altlinux.org>
+   - klogd: Add -u option to become the specified user.
+   - klogd: Add -j option to run in chroot.
+   - syslogd: Add -i option to specify IP address to bind to.
+   - syslogd: Add -u option to switch to another user.
+   - syslogd: Add -j option to chroot daemon.
+   - syslogd: Add -P option to specify directory with symlinks to additional
+     sockets has to listen to.
+   - syslogd: Change the permissions of created files from 644 to 600.
+   - syslogd, klogd: Redirect std descriptors to /dev/null.
+
  . Alan Jenkins <alan-jenkins@tuffmail.co.uk>
    - Improved sleep/alarm/mark implementation
+
  . Thomas Jarosch <thomas.jarosch@intra2net.com>
    - Move hostname setting code from main() into init()
+
  . Joey
    - Only read /etc/services when needed
    - Documentation update
+
  . John Haxby <john.haxby@oracle.com>
    - IPv6 support forward ported from FreeBSD
+
  . David Couture <glowplugrelayw0rks@gmail.com>
    - Correct continuation line problems on 64bit architecture
 
