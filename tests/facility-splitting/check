@@ -1,0 +1,27 @@
+#!/bin/sh -efu
+
+. "$TOPDIR/tests/common.sh"
+
+WORKDIR="$1"
+
+prepare
+
+{
+	for n in $facilities; do
+		rm -f -- "$WORKDIR/output/syslog-$n.log"
+		printf '%s.*\t%s\n' "$n" "$WORKDIR/output/syslog-$n.log"
+	done
+	printf '*.info\t%s\n' "$WORKDIR/syslog-mark.log"
+} > "$WORKDIR/syslog.conf"
+
+run_syslogd &
+sleep 0.3
+
+for n in $facilities; do
+	logger --socket "$WORKDIR/log" -p "$n.info" "TEST $n"
+done
+
+wait_mark
+normilize_logs "$WORKDIR/output"
+
+diff -rU0 "$WORKDIR/expect" "$WORKDIR/output"
