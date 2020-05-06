@@ -73,9 +73,28 @@ SYSLOG_FLAGS= -DALLOW_KERNEL_LOGGING
 KLOGD_FLAGS = ${FSSTND} ${KLOGD_START_DELAY}
 DEB =
 
+TESTS = \
+	facility-splitting \
+	priority-splitting \
+	priority-exclusion \
+	priority-exclamation \
+	named-pipes
+
 all: syslogd klogd
 
-test: syslog_tst oops.ko
+test:
+	@export TOPDIR="$(CURDIR)"; \
+	suiterc=0; \
+	for n in $(TESTS); do \
+	  tests/travis-command-start "$$n" "test.$$n"; \
+	  echo "### Check: $$n ... "; \
+	  if ! "tests/run" "$$n"; then \
+	    echo "Test FAILED"; \
+	    suiterc=1; \
+	  fi; \
+	  tests/travis-command-stop "$$n"; \
+	done; \
+	exit $$suiterc;
 
 install: install_man install_exec
 

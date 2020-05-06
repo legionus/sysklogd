@@ -1,0 +1,5 @@
+May 1 12:34:56 example.com user: TEST local1.warning
+May 1 12:34:56 example.com user: TEST local1.notice
+May 1 12:34:56 example.com user: TEST local1.info
+May 1 12:34:56 example.com user: TEST local1.debug
+May 1 12:34:56 example.com user: TEST local1.warn
