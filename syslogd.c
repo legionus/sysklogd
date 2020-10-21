@@ -289,6 +289,16 @@ struct sourceinfo {
 	unsigned int flags;
 } sinfo;
 
+enum record_fields_type {
+	RECORD_FIELD_TIME = 0,
+	RECORD_FIELD_SEP1,
+	RECORD_FIELD_HOST,
+	RECORD_FIELD_SEP2,
+	RECORD_FIELD_MSG,
+	RECORD_FIELD_EOL,
+	RECORD_FIELD_COUNTS,
+};
+
 static int	Debug;			/* debug flag */
 static int	Compress = 1;		/* compress repeated messages flag */
 static char	LocalHostName[MAXHOSTNAMELEN+1];	/* our hostname */
@@ -332,7 +342,7 @@ void printline(const struct sourceinfo* const, char *msg);
 void logmsg(int pri, char *msg, const struct sourceinfo* const, int flags);
 void fprintlog(register struct filed *f, char *from, int flags, char *msg);
 void endtty(int);
-void wallmsg(register struct filed *f, struct iovec *iov, size_t iovsz);
+void wallmsg(register struct filed *f, struct iovec iov[RECORD_FIELD_COUNTS]);
 void reapchild(int);
 const char *cvtaddr(struct sockaddr_storage *f, int len);
 const char *cvthname(struct sockaddr_storage *f, int len);
@@ -1443,10 +1453,16 @@ finish:
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
 }
 
+static inline void set_record_field(struct iovec iov[RECORD_FIELD_COUNTS],
+		enum record_fields_type name, char *value, size_t len)
+{
+	iov[name].iov_base = value;
+	iov[name].iov_len = len == -1 ? strlen(value) : len;
+}
+
 void fprintlog(struct filed *f, char *from, int flags, char *msg)
 {
-	struct iovec iov[6];
-	register struct iovec *v = iov;
+	struct iovec iov[RECORD_FIELD_COUNTS];
 	char repbuf[80];
 #ifdef SYSLOG_INET
 	register int l;
@@ -1458,31 +1474,20 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 
 	verbosef("Called fprintlog, ");
 
-	v->iov_base = f->f_lasttime;
-	v->iov_len = 15;
-	v++;
-	v->iov_base = " ";
-	v->iov_len = 1;
-	v++;
-	v->iov_base = f->f_prevhost;
-	v->iov_len = strlen(v->iov_base);
-	v++;
-	v->iov_base = " ";
-	v->iov_len = 1;
-	v++;
+	set_record_field(iov, RECORD_FIELD_TIME, f->f_lasttime, 15);
+	set_record_field(iov, RECORD_FIELD_SEP1, " ", 1);
+	set_record_field(iov, RECORD_FIELD_HOST, f->f_prevhost, -1);
+	set_record_field(iov, RECORD_FIELD_SEP2, " ", 1);
+
 	if (msg) {
-		v->iov_base = msg;
-		v->iov_len = strlen(msg);
+		set_record_field(iov, RECORD_FIELD_MSG, msg, -1);
 	} else if (f->f_prevcount > 1) {
 		(void) snprintf(repbuf, sizeof(repbuf), "last message repeated %d times",
 		    f->f_prevcount);
-		v->iov_base = repbuf;
-		v->iov_len = strlen(repbuf);
+		set_record_field(iov, RECORD_FIELD_MSG, repbuf, -1);
 	} else {
-		v->iov_base = f->f_prevline;
-		v->iov_len = f->f_prevlen;
+		set_record_field(iov, RECORD_FIELD_MSG, f->f_prevline, f->f_prevlen);
 	}
-	v++;
 
 	verbosef("logging to %s", TypeNames[f->f_type]);
 
@@ -1508,14 +1513,13 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 				(long)(INET_SUSPEND_TIME - fwd_suspend));
 		}
 		break;
-		
 	/*
 	 * The trick is to wait some time, then retry to get the
 	 * address. If that fails retry x times and then give up.
 	 *
 	 * You'll run into this problem mostly if the name server you
 	 * need for resolving the address is on the same machine, but
-	 * is started after syslogd. 
+	 * is started after syslogd.
 	 */
 	case F_FORW_UNKN:
 		verbosef(" %s\n", f->f_un.f_forw.f_hname);
@@ -1549,7 +1553,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 		break;
 
 	case F_FORW:
-		/* 
+		/*
 		 * Don't send any message to a remote host if it
 		 * already comes from one. (we don't care 'bout who
 		 * sent the message, we don't send it anyway)  -Joey
@@ -1562,7 +1566,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 			int i;
 			f->f_time = now;
 			(void) snprintf(line, sizeof(line), "<%d>%s", f->f_prevpri, \
-				(char *) iov[4].iov_base);
+				(char *) iov[RECORD_FIELD_MSG].iov_base);
 			l = strlen(line);
 			if (l > MAXLINE)
 				l = MAXLINE;
@@ -1582,7 +1586,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 					break;
 			}
 			if (err != -1) {
-				verbosef("INET sendto error: %d = %s.\n", 
+				verbosef("INET sendto error: %d = %s.\n",
 					err, strerror(err));
 				f->f_type = F_FORW_SUSP;
 				errno = err;
@@ -1597,7 +1601,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 #ifdef UNIXPC
 		if (1) {
 #else
-		if (flags & IGN_CONS) {	
+		if (flags & IGN_CONS) {
 #endif
 			verbosef(" (ignored).\n");
 			break;
@@ -1610,11 +1614,9 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 		f->f_time = now;
 		verbosef(" %s\n", f->f_un.f_fname);
 		if (f->f_type == F_TTY || f->f_type == F_CONSOLE) {
-			v->iov_base = "\r\n";
-			v->iov_len = 2;
+			set_record_field(iov, RECORD_FIELD_EOL, "\r\n", 2);
 		} else {
-			v->iov_base = "\n";
-			v->iov_len = 1;
+			set_record_field(iov, RECORD_FIELD_EOL, "\n", 1);
 		}
 	again:
 		/* f->f_file == -1 is an indicator that we couldn't
@@ -1622,7 +1624,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 		if (f->f_file == -1)
 			break;
 
-		if (writev(f->f_file, iov, 6) < 0) {
+		if (writev(f->f_file, iov, RECORD_FIELD_COUNTS) < 0) {
 			int e = errno;
 
 			/* If a named pipe is full, just ignore it for now */
@@ -1669,9 +1671,8 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 	case F_WALL:
 		f->f_time = now;
 		verbosef("\n");
-		v->iov_base = "\r\n";
-		v->iov_len = 2;
-		wallmsg(f, iov, 6);
+		set_record_field(iov, RECORD_FIELD_EOL, "\r\n", 2);
+		wallmsg(f, iov);
 		break;
 	} /* switch */
 	if (f->f_type != F_FORW_UNKN)
@@ -1693,7 +1694,7 @@ void endtty(int sig)
  *	world, or a list of approved users.
  */
 
-void wallmsg(struct filed *f, struct iovec *iov, size_t iovsz)
+void wallmsg(struct filed *f, struct iovec iov[RECORD_FIELD_COUNTS])
 {
 	char p[sizeof (_PATH_DEV) + UNAMESZ];
 	register int i;
@@ -1722,7 +1723,7 @@ void wallmsg(struct filed *f, struct iovec *iov, size_t iovsz)
 
 		(void) snprintf(greetings, sizeof(greetings),
 		    "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
-			(char *) iov[2].iov_base, ctime(&now));
+			(char *) iov[RECORD_FIELD_HOST].iov_base, ctime(&now));
 		len = strlen(greetings);
 
 		/* scan the user login file */
@@ -1768,9 +1769,10 @@ void wallmsg(struct filed *f, struct iovec *iov, size_t iovsz)
 				if (ttyf >= 0) {
 					struct stat statb;
 
-					if (fstat(ttyf, &statb) == 0 &&
-					    (statb.st_mode & S_IWRITE))
-						(void) writev(ttyf, iov, iovsz);
+					if (!fstat(ttyf, &statb) && (statb.st_mode & S_IWRITE)) {
+						if (writev(ttyf, iov, RECORD_FIELD_COUNTS) < 0)
+							errno = 0; /* ignore */
+					}
 					close(ttyf);
 					ttyf = -1;
 				}
