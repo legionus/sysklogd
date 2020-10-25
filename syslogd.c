@@ -348,7 +348,8 @@ const char *cvtaddr(struct sockaddr_storage *f, int len);
 const char *cvthname(struct sockaddr_storage *f, int len);
 void domark(int);
 void debug_switch(int);
-void logerror(const char *type);
+void logerror(const char *fmt, ...)
+	SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 void die(int sig);
 void doexit(int sig);
 void init();
@@ -1927,24 +1928,34 @@ void debug_switch(int sig)
 /*
  * Print syslogd errors some place.
  */
-void logerror(const char *type)
+void logerror(const char *fmt, ...)
 {
+	va_list ap;
 	char buf[BUFSIZ];
 	struct sourceinfo source;
+	int sv_errno = errno;
+
+	strncpy(buf, "syslogd: ", sizeof(buf));
+
+	va_start(ap, fmt);
+	vsnprintf(buf + 9, sizeof(buf) - 9, fmt, ap);
+	va_end(ap);
+
+	verbosef("Called logerror: %s\n", buf);
+
+	if (sv_errno != 0) {
+		size_t bufsz = strlen(buf);
+		if (strerror_r(sv_errno, buf + bufsz, sizeof(buf) - bufsz))
+			errno = 0; // ignore
+	}
 
 	memset(&source, '\0', sizeof(source));
 
 	source.flags = SINFO_ISINTERNAL;
 	source.hostname = LocalHostName;
 
-	verbosef("Called logerr, msg: %s\n", type);
-
-	if (errno == 0)
-		(void) snprintf(buf, sizeof(buf), "syslogd: %s", type);
-	else
-		(void) snprintf(buf, sizeof(buf), "syslogd: %s: %s", type, strerror(errno));
-	errno = 0;
 	logmsg(LOG_SYSLOG|LOG_ERR, buf, &source, ADDDATE);
+	errno = 0;
 	return;
 }
 
@@ -2268,7 +2279,6 @@ void cfline(char *line, struct filed *f)
 	struct addrinfo hints, *ai;
 #endif
 	char buf[MAXLINE];
-	char xbuf[BUFSIZ];
 
 	verbosef("cfline(%s)\n", line);
 
@@ -2316,8 +2326,7 @@ void cfline(char *line, struct filed *f)
 		}
 
 		if (pri < 0) {
-			(void) snprintf(xbuf, sizeof(xbuf), "unknown priority name \"%s\"", buf);
-			logerror(xbuf);
+			logerror("unknown priority name \"%s\"", buf);
 			return;
 		}
 
@@ -2363,8 +2372,7 @@ void cfline(char *line, struct filed *f)
 				i = decode(buf, FacNames);
 				if (i < 0) {
 
-					(void) snprintf(xbuf, sizeof(xbuf), "unknown facility name \"%s\"", buf);
-					logerror(xbuf);
+					logerror("unknown facility name \"%s\"", buf);
 					return;
 				}
 
@@ -2457,8 +2465,7 @@ void cfline(char *line, struct filed *f)
 
 		if ( f->f_file < 0 ){
 			f->f_file = -1;
-			verbosef("Error opening log file: %s\n", p);
-			logerror(p);
+			logerror("Error opening log file: %s", p);
 			break;
 		}
 		if (isatty(f->f_file)) {
@@ -2558,7 +2565,6 @@ static void allocate_log(void)
 		Files = (struct filed *) malloc(sizeof(struct filed));
 		if ( Files == (void *) 0 )
 		{
-			verbosef("Cannot initialize log structure.");
 			logerror("Cannot initialize log structure.");
 			return;
 		}
@@ -2570,7 +2576,6 @@ static void allocate_log(void)
 						  sizeof(struct filed));
 		if ( Files == (struct filed *) 0 )
 		{
-			verbosef("Cannot grow log structure.");
 			logerror("Cannot grow log structure.");
 			return;
 		}
