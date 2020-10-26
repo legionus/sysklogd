@@ -289,15 +289,37 @@ struct sourceinfo {
 	unsigned int flags;
 } sinfo;
 
-enum record_fields_type {
-	RECORD_FIELD_TIME = 0,
-	RECORD_FIELD_SEP1,
-	RECORD_FIELD_HOST,
-	RECORD_FIELD_SEP2,
-	RECORD_FIELD_MSG,
-	RECORD_FIELD_EOL,
-	RECORD_FIELD_COUNTS,
+enum log_format_type {
+	LOG_FORMAT_NONE = 0,
+	LOG_FORMAT_BOL,
+	LOG_FORMAT_TIME,
+	LOG_FORMAT_HOST,
+	LOG_FORMAT_MSG,
+	LOG_FORMAT_EOL,
+	LOG_FORMAT_COUNTS,
 };
+
+#define LOG_FORMAT_REPEAT_MAX  5
+#define LOG_FORMAT_FIELDS_MAX  LOG_FORMAT_COUNTS * LOG_FORMAT_REPEAT_MAX
+#define LOG_FORMAT_IOVEC_MAX   LOG_FORMAT_FIELDS_MAX * 2 + 1
+
+struct log_format_field {
+	enum log_format_type f_type;
+	struct iovec *f_iov;
+};
+
+struct log_format {
+	char *line;
+
+	struct iovec *iov;
+	size_t iovec_nr;
+
+	struct log_format_field *fields;
+	size_t fields_nr;
+};
+
+static struct log_format log_fmt = { 0 };
+static long int iovec_max = 0;
 
 static int	Debug;			/* debug flag */
 static int	Compress = 1;		/* compress repeated messages flag */
@@ -307,6 +329,7 @@ static char	*emptystring = "";
 static int	InetInuse = 0;		/* non-zero if INET sockets are being used */
 static int	*finet = NULL;		/* Internet datagram sockets */
 static int	Initialized = 0;	/* set when we have initialized ourselves */
+static int	LogFormatInitialized = 0; /* set when we have initialized log_format */
 static int	MarkInterval = 20 * 60;	/* interval between marks in seconds */
 #ifdef INET6
 static int	family = PF_UNSPEC;	/* protocol family (IPv4, IPv6 or both) */
@@ -340,9 +363,15 @@ void untty(void);
 void printchopped(const struct sourceinfo* const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo* const, char *msg);
 void logmsg(int pri, char *msg, const struct sourceinfo* const, int flags);
+char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
+	SYSKLOGD_NONNULL((1));
+void clear_record_fields(struct log_format *log_fmt)
+	SYSKLOGD_NONNULL((1));
+void set_record_field(struct log_format *log_fmt, enum log_format_type name, char *value, ssize_t len)
+	SYSKLOGD_NONNULL((1));
 void fprintlog(register struct filed *f, char *from, int flags, char *msg);
 void endtty(int);
-void wallmsg(register struct filed *f, struct iovec iov[RECORD_FIELD_COUNTS]);
+void wallmsg(register struct filed *f, struct log_format *log_fmt);
 void reapchild(int);
 const char *cvtaddr(struct sockaddr_storage *f, int len);
 const char *cvthname(struct sockaddr_storage *f, int len);
@@ -358,6 +387,9 @@ int decode(char *name, struct code *codetab);
 static void verbosef(char *, ...)
 	SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 static void allocate_log(void);
+int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t, char *s, size_t n)
+	SYSKLOGD_NONNULL((1));
+int parse_log_format(struct log_format *log_fmt, char *s);
 void sighup_handler(int);
 
 #ifdef SYSLOG_UNIXAF
@@ -647,6 +679,9 @@ int main(int argc, char **argv)
 	}
 	if (funix_dir && *funix_dir)
 		add_funix_dir(funix_dir);
+
+	if (parse_log_format(&log_fmt, "%t %h %m") < 0)
+		exit(1);
 
 	if ( !(Debug || NoFork) )
 	{
@@ -1454,16 +1489,38 @@ finish:
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
 }
 
-static inline void set_record_field(struct iovec iov[RECORD_FIELD_COUNTS],
-		enum record_fields_type name, char *value, size_t len)
+char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
 {
-	iov[name].iov_base = value;
-	iov[name].iov_len = len == -1 ? strlen(value) : len;
+	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
+		if (log_fmt->fields[i].f_type == name)
+			return log_fmt->fields[i].f_iov->iov_base;
+	}
+	return NULL;
+}
+
+void set_record_field(struct log_format *log_fmt,
+		enum log_format_type name, char *value, ssize_t len)
+{
+	size_t iov_len = len == -1 ? strlen(value) : len;
+
+	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
+		if (log_fmt->fields[i].f_type == name) {
+			log_fmt->fields[i].f_iov->iov_base = value;
+			log_fmt->fields[i].f_iov->iov_len = iov_len;
+		}
+	}
+}
+
+void clear_record_fields(struct log_format *log_fmt)
+{
+	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
+		log_fmt->fields[i].f_iov->iov_base = NULL;
+		log_fmt->fields[i].f_iov->iov_len = 0;
+	}
 }
 
 void fprintlog(struct filed *f, char *from, int flags, char *msg)
 {
-	struct iovec iov[RECORD_FIELD_COUNTS];
 	char repbuf[80];
 #ifdef SYSLOG_INET
 	register int l;
@@ -1475,19 +1532,18 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 
 	verbosef("Called fprintlog, ");
 
-	set_record_field(iov, RECORD_FIELD_TIME, f->f_lasttime, 15);
-	set_record_field(iov, RECORD_FIELD_SEP1, " ", 1);
-	set_record_field(iov, RECORD_FIELD_HOST, f->f_prevhost, -1);
-	set_record_field(iov, RECORD_FIELD_SEP2, " ", 1);
+	clear_record_fields(&log_fmt);
 
+	set_record_field(&log_fmt, LOG_FORMAT_TIME, f->f_lasttime, 15);
+	set_record_field(&log_fmt, LOG_FORMAT_HOST, f->f_prevhost, -1);
 	if (msg) {
-		set_record_field(iov, RECORD_FIELD_MSG, msg, -1);
+		set_record_field(&log_fmt, LOG_FORMAT_MSG, msg, -1);
 	} else if (f->f_prevcount > 1) {
 		(void) snprintf(repbuf, sizeof(repbuf), "last message repeated %d times",
 		    f->f_prevcount);
-		set_record_field(iov, RECORD_FIELD_MSG, repbuf, -1);
+		set_record_field(&log_fmt, LOG_FORMAT_MSG, repbuf, -1);
 	} else {
-		set_record_field(iov, RECORD_FIELD_MSG, f->f_prevline, f->f_prevlen);
+		set_record_field(&log_fmt, LOG_FORMAT_MSG, f->f_prevline, f->f_prevlen);
 	}
 
 	verbosef("logging to %s", TypeNames[f->f_type]);
@@ -1567,7 +1623,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 			int i;
 			f->f_time = now;
 			(void) snprintf(line, sizeof(line), "<%d>%s", f->f_prevpri, \
-				(char *) iov[RECORD_FIELD_MSG].iov_base);
+				(char *) log_fmt.iov[LOG_FORMAT_MSG].iov_base);
 			l = strlen(line);
 			if (l > MAXLINE)
 				l = MAXLINE;
@@ -1615,9 +1671,9 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 		f->f_time = now;
 		verbosef(" %s\n", f->f_un.f_fname);
 		if (f->f_type == F_TTY || f->f_type == F_CONSOLE) {
-			set_record_field(iov, RECORD_FIELD_EOL, "\r\n", 2);
+			set_record_field(&log_fmt, LOG_FORMAT_EOL, "\r\n", 2);
 		} else {
-			set_record_field(iov, RECORD_FIELD_EOL, "\n", 1);
+			set_record_field(&log_fmt, LOG_FORMAT_EOL, "\n", 1);
 		}
 	again:
 		/* f->f_file == -1 is an indicator that we couldn't
@@ -1625,7 +1681,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 		if (f->f_file == -1)
 			break;
 
-		if (writev(f->f_file, iov, RECORD_FIELD_COUNTS) < 0) {
+		if (writev(f->f_file, log_fmt.iov, LOG_FORMAT_IOVEC_MAX) < 0) {
 			int e = errno;
 
 			/* If a named pipe is full, just ignore it for now */
@@ -1672,8 +1728,8 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 	case F_WALL:
 		f->f_time = now;
 		verbosef("\n");
-		set_record_field(iov, RECORD_FIELD_EOL, "\r\n", 2);
-		wallmsg(f, iov);
+		set_record_field(&log_fmt, LOG_FORMAT_EOL, "\r\n", 2);
+		wallmsg(f, &log_fmt);
 		break;
 	} /* switch */
 	if (f->f_type != F_FORW_UNKN)
@@ -1695,24 +1751,21 @@ void endtty(int sig)
  *	world, or a list of approved users.
  */
 
-void wallmsg(struct filed *f, struct iovec iov[RECORD_FIELD_COUNTS])
+void wallmsg(struct filed *f, struct log_format *log_fmt)
 {
 	char p[sizeof (_PATH_DEV) + UNAMESZ];
 	register int i;
-	int ttyf, len;
+	int ttyf;
 	static int reenter = 0;
 	struct utmp ut;
 	struct utmp *uptr;
 	char greetings[200];
-
-	(void) &len;
 
 	if (reenter++)
 		return;
 
 	/* open the user login file */
 	setutent();
-
 
 	/*
 	 * Might as well fork instead of using nonblocking I/O
@@ -1722,10 +1775,13 @@ void wallmsg(struct filed *f, struct iovec iov[RECORD_FIELD_COUNTS])
 		(void) signal(SIGTERM, SIG_DFL);
 		(void) alarm(0);
 
-		(void) snprintf(greetings, sizeof(greetings),
-		    "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
-			(char *) iov[RECORD_FIELD_HOST].iov_base, ctime(&now));
-		len = strlen(greetings);
+		if (f->f_type == F_WALL) {
+			snprintf(greetings, sizeof(greetings),
+			    "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
+				get_record_field(log_fmt, LOG_FORMAT_HOST), ctime(&now));
+
+			set_record_field(log_fmt, LOG_FORMAT_BOL, greetings, -1);
+		}
 
 		/* scan the user login file */
 		while ((uptr = getutent())) {
@@ -1757,11 +1813,6 @@ void wallmsg(struct filed *f, struct iovec iov[RECORD_FIELD_COUNTS])
 			strcpy(p, _PATH_DEV);
 			strncat(p, ut.ut_line, UNAMESZ);
 
-			if (f->f_type == F_WALL) {
-				iov[0].iov_base = greetings;
-				iov[0].iov_len = len;
-				iov[1].iov_len = 0;
-			}
 			if (setjmp(ttybuf) == 0) {
 				(void) signal(SIGALRM, endtty);
 				(void) alarm(15);
@@ -1771,7 +1822,7 @@ void wallmsg(struct filed *f, struct iovec iov[RECORD_FIELD_COUNTS])
 					struct stat statb;
 
 					if (!fstat(ttyf, &statb) && (statb.st_mode & S_IWRITE)) {
-						if (writev(ttyf, iov, RECORD_FIELD_COUNTS) < 0)
+						if (writev(ttyf, log_fmt->iov, LOG_FORMAT_IOVEC_MAX) < 0)
 							errno = 0; /* ignore */
 					}
 					close(ttyf);
@@ -1924,7 +1975,6 @@ void debug_switch(int sig)
 	signal(SIGUSR1, debug_switch);
 }
 
-
 /*
  * Print syslogd errors some place.
  */
@@ -1947,6 +1997,11 @@ void logerror(const char *fmt, ...)
 		size_t bufsz = strlen(buf);
 		if (strerror_r(sv_errno, buf + bufsz, sizeof(buf) - bufsz))
 			errno = 0; // ignore
+	}
+
+	if (!LogFormatInitialized) {
+		fputs(buf, stderr);
+		return;
 	}
 
 	memset(&source, '\0', sizeof(source));
@@ -2162,6 +2217,13 @@ void init(void)
 			cline = cbuf;
 
 		*++p = '\0';
+
+
+		if (!strncmp("log_format:", cline, 11)) {
+			for (p = cline + 11; isspace(*p); ++p);
+			parse_log_format(&log_fmt, p);
+			continue;
+		}
 
 		allocate_log();
 		f = &Files[lognum++];
@@ -2590,6 +2652,161 @@ static void allocate_log(void)
 	return;
 }
 
+int set_log_format_field(struct log_format *log_fmt, size_t i,
+		enum log_format_type t, char *s, size_t n)
+{
+	if (i >= iovec_max) {
+		logerror("Too many parts in the log_format string");
+		return -1;
+	}
+
+	if (t != LOG_FORMAT_NONE) {
+		if (log_fmt->fields_nr >= LOG_FORMAT_FIELDS_MAX) {
+			logerror("Too many placeholders in the log_format string");
+			return -1;
+		}
+
+		log_fmt->fields[log_fmt->fields_nr].f_type = t;
+		log_fmt->fields[log_fmt->fields_nr].f_iov = log_fmt->iov + i;
+		log_fmt->fields_nr++;
+	}
+
+	log_fmt->iov[i].iov_base = s;
+	log_fmt->iov[i].iov_len = n;
+	log_fmt->iovec_nr++;
+
+	return 0;
+}
+
+int parse_log_format(struct log_format *log_fmt, char *str)
+{
+	char *ptr, *start;
+	int i, special, field_nr;
+	struct log_format new_fmt = { 0 };
+
+	iovec_max = sysconf(_SC_IOV_MAX);
+
+	new_fmt.line = calloc(1, LINE_MAX);
+	if (!new_fmt.line) {
+		logerror("Cannot allocate log_format string");
+		goto error;
+	}
+
+	new_fmt.iov = calloc(LOG_FORMAT_IOVEC_MAX, sizeof(struct iovec));
+	if (!new_fmt.iov) {
+		logerror("Cannot allocate records array for log_format string");
+		goto error;
+	}
+
+	new_fmt.fields = calloc(LOG_FORMAT_FIELDS_MAX, sizeof(struct log_format_field));
+	if (!new_fmt.fields) {
+		logerror("Cannot allocate rules array for log_format string");
+		goto error;
+	}
+
+	ptr = str;
+	i = special = 0;
+
+	while (*ptr != '\0' && i < LINE_MAX) {
+		char c = *ptr++;
+
+		switch (c) {
+			case 'b': if (special) c = '\b'; break;
+			case 'f': if (special) c = '\f'; break;
+			case 'n': if (special) c = '\n'; break;
+			case 'r': if (special) c = '\r'; break;
+			case 't': if (special) c = '\t'; break;
+			case '\\':
+				if (!special) {
+					special = 1;
+					continue;
+				}
+				break;
+		}
+		new_fmt.line[i++] = c;
+		special = 0;
+	}
+
+	field_nr = 0;
+	special = 0;
+	i = 0;
+
+	if (set_log_format_field(&new_fmt, field_nr++, LOG_FORMAT_BOL, NULL, 0) < 0)
+		goto error;
+
+	start = ptr = new_fmt.line;
+
+	while (*ptr != '\0') {
+		enum log_format_type f_type;
+
+		if (special) {
+			switch (*ptr) {
+				case 't': f_type = LOG_FORMAT_TIME; break;
+				case 'h': f_type = LOG_FORMAT_HOST; break;
+				case 'm': f_type = LOG_FORMAT_MSG;  break;
+				case '%':
+					special = 0;
+					goto create_special;
+				default:
+					logerror("unexpected special: '%%%c'", *ptr);
+					goto error;
+			}
+			special = 0;
+			goto create_field;
+
+		} else if (*ptr == '%')
+			special = 1;
+next:
+		ptr++;
+		continue;
+create_field:
+		if ((ptr - start - 1) > 0 &&
+		    set_log_format_field(&new_fmt, field_nr++,
+				LOG_FORMAT_NONE, start, (ptr - start - 1)) < 0)
+			goto error;
+
+		if (set_log_format_field(&new_fmt, field_nr++, f_type, NULL, 0) < 0)
+			goto error;
+
+		start = ptr + 1;
+		goto next;
+create_special:
+		if (set_log_format_field(&new_fmt, field_nr++,
+				LOG_FORMAT_NONE, start, (ptr - start - 1)) < 0)
+			goto error;
+
+		start = ptr;
+		goto next;
+	}
+
+	if (special) {
+		logerror("unexpected '%%' at the end of line");
+		goto error;
+	}
+
+	if (start != ptr &&
+	    set_log_format_field(&new_fmt, field_nr++,
+			LOG_FORMAT_NONE, start, (ptr - start)) < 0)
+		goto error;
+
+	if (set_log_format_field(&new_fmt, field_nr++,
+			LOG_FORMAT_EOL, NULL, 0) < 0)
+		goto error;
+
+	log_fmt->line   = new_fmt.line;
+	log_fmt->iov    = new_fmt.iov;
+	log_fmt->fields = new_fmt.fields;
+
+	LogFormatInitialized = 1;
+
+	return 0;
+error:
+	free(new_fmt.line);
+	free(new_fmt.iov);
+	free(new_fmt.fields);
+
+	return -1;
+}
 
 /*
  * The following function is resposible for handling a SIGHUP signal.  Since
