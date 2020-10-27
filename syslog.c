@@ -116,7 +116,9 @@ __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
 		++v;
 		v->iov_base = "\n";
 		v->iov_len = 1;
-		(void)writev(2, iov, 2);
+
+		if (writev(2, iov, 2) < 0)
+			errno = 0; // ignore
 	}
 
 	/* output the message to the local logger */
@@ -141,7 +143,10 @@ __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
 	(void)strcat(tbuf, "\r\n");
 	cnt += 2;
 	p = index(tbuf, '>') + 1;
-	(void)write(fd, p, cnt - (p - tbuf));
+
+	if (write(fd, p, cnt - (p - tbuf)) < 0)
+		errno = 0; // ignore
+
 	(void)close(fd);
 }
 

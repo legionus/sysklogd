@@ -390,7 +390,7 @@ void logerror(const char *fmt, ...)
     SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 void die(int sig);
 void doexit(int sig);
-void init();
+void init(void);
 void cfline(char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
 void verbosef(char *, ...)
