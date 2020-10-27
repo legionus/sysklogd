@@ -314,6 +314,7 @@ struct log_format {
 	struct iovec *iov;
 	size_t iovec_nr;
 
+	unsigned int f_mask;
 	struct log_format_field *fields;
 	size_t fields_nr;
 };
@@ -1491,6 +1492,9 @@ finish:
 
 char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
 {
+	if (!(log_fmt->f_mask | (1 << name)))
+		return NULL;
+
 	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
 		if (log_fmt->fields[i].f_type == name)
 			return log_fmt->fields[i].f_iov->iov_base;
@@ -1501,7 +1505,12 @@ char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
 void set_record_field(struct log_format *log_fmt,
 		enum log_format_type name, char *value, ssize_t len)
 {
-	size_t iov_len = len == -1 ? strlen(value) : len;
+	size_t iov_len;
+
+	if (!(log_fmt->f_mask | (1 << name)))
+		return;
+
+	iov_len = len == -1 ? strlen(value) : len;
 
 	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
 		if (log_fmt->fields[i].f_type == name) {
@@ -2666,6 +2675,7 @@ int set_log_format_field(struct log_format *log_fmt, size_t i,
 			return -1;
 		}
 
+		log_fmt->f_mask |= (1 << t);
 		log_fmt->fields[log_fmt->fields_nr].f_type = t;
 		log_fmt->fields[log_fmt->fields_nr].f_iov = log_fmt->iov + i;
 		log_fmt->fields_nr++;
