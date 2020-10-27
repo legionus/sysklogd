@@ -99,19 +99,19 @@ test:
 install: install_man install_exec
 
 syslogd: syslogd.o pidfile.o
-	${CC} ${LDFLAGS} -o syslogd syslogd.o pidfile.o ${LIBS}
+	${CC} ${LDFLAGS} -o $@ $^ ${LIBS}
 
 klogd:	klogd.o syslog.o pidfile.o
-	${CC} ${LDFLAGS} -o klogd klogd.o syslog.o pidfile.o ${LIBS}
+	${CC} ${LDFLAGS} -o $@ $^ ${LIBS}
 
 syslogd.o: syslogd.c version.h
-	${CC} ${SKFLAGS} ${SYSLOGD_FLAGS} $(DEB) -c syslogd.c
+	${CC} ${SKFLAGS} ${SYSLOGD_FLAGS} $(DEB) -c $<
 
 syslog.o: syslog.c
-	${CC} ${SKFLAGS} ${SYSLOG_FLAGS} -c syslog.c
+	${CC} ${SKFLAGS} ${SYSLOG_FLAGS} -c $<
 
 klogd.o: klogd.c klogd.h version.h
-	${CC} ${SKFLAGS} ${KLOGD_FLAGS} $(DEB) -c klogd.c
+	${CC} ${SKFLAGS} ${KLOGD_FLAGS} $(DEB) -c $<
 
 clean:
 	rm -f *.o *.log *~ *.orig
