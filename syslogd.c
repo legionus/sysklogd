@@ -1008,29 +1008,29 @@ int main(int argc, char **argv)
 
 #ifdef SYSLOG_UNIXAF
 		for (i = 0; i < nfunix; i++) {
-		    if ((fd = funix[i]) != -1 && FD_ISSET(fd, &readfds)) {
-			memset(&sinfo, '\0', sizeof(sinfo));
-			memset(line, 0, sizeof(line));
+			if ((fd = funix[i]) != -1 && FD_ISSET(fd, &readfds)) {
+				memset(&sinfo, '\0', sizeof(sinfo));
+				memset(line, 0, sizeof(line));
 
-			msglen = recv_withcred(fd, line, MAXLINE - 2, 0,
-					&sinfo.pid, &sinfo.uid, &sinfo.gid);
+				msglen = recv_withcred(fd, line, MAXLINE - 2, 0,
+						&sinfo.pid, &sinfo.uid, &sinfo.gid);
 
-			verbosef("Message from UNIX socket: #%d\n", fd);
+				verbosef("Message from UNIX socket: #%d\n", fd);
 
-			if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
-				logerror("error - credentials not provided");
-			else
-				sinfo.flags = SINFO_HAVECRED;
+				if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
+					logerror("error - credentials not provided");
+				else
+					sinfo.flags = SINFO_HAVECRED;
 
-			if (msglen > 0) {
-				sinfo.hostname = LocalHostName;
-				printchopped(&sinfo, line, msglen + 2, fd);
-			} else if (msglen < 0 && errno != EINTR) {
-				verbosef("UNIX socket error: %d = %s.\n", \
-					errno, strerror(errno));
-				logerror("recvfrom UNIX");
+				if (msglen > 0) {
+					sinfo.hostname = LocalHostName;
+					printchopped(&sinfo, line, msglen + 2, fd);
+				} else if (msglen < 0 && errno != EINTR) {
+					verbosef("UNIX socket error: %d = %s.\n", \
+							errno, strerror(errno));
+					logerror("recvfrom UNIX");
+				}
 			}
-		    }
 		}
 #endif
 
@@ -1084,23 +1084,23 @@ crunch_list(char *list)
 	char **result = NULL;
 
 	p = list;
-	
+
 	/* strip off trailing delimiters */
 	while (*p && p[strlen(p)-1] == LIST_DELIMITER)
 		p[strlen(p)-1] = '\0';
 	/* cut off leading delimiters */
 	while (p[0] == LIST_DELIMITER)
-		p++; 
-	
+		p++;
+
 	/* count delimiters to calculate the number of elements */
 	for (n = i = 0; p[i]; i++)
 		if (p[i] == LIST_DELIMITER) n++;
-	
+
 	if ((result = (char **)malloc(sizeof(char *) * (n + 2))) == NULL) {
 		printf ("Sorry, can't get enough memory, exiting.\n");
 		exit(1);
 	}
-	
+
 	/*
 	 * We now can assume that the first and last
 	 * characters are different from any delimiters,
@@ -1146,7 +1146,7 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 
 	auto char *start = msg,
 		  *p,
-	          *end,
+		  *end,
 		  tmpline[MAXLINE + 1];
 
 	verbosef("Message length: %lu, File descriptor: %d.\n", (unsigned long)len, fd);
@@ -1453,7 +1453,7 @@ void logmsg(int pri, char *msg, const struct sourceinfo * const from, int flags)
 				if (LastAlarm > TIMERINTVL)
 					LastAlarm = TIMERINTVL;
 				alarm(LastAlarm);
- 			}
+			}
 
 			/*
 			 * If domark would have logged this by now,
@@ -2098,7 +2098,7 @@ void die(int sig)
 	}
 
 	/* Close the UNIX sockets. */
-        for (i = 0; i < nfunix; i++)
+	for (i = 0; i < nfunix; i++)
 		if (funix[i] != -1)
 			close(funix[i]);
 	/* Close the inet sockets. */
@@ -2109,7 +2109,7 @@ void die(int sig)
 	}
 
 	/* Clean-up files. */
-        for (i = 0; i < nfunix; i++)
+	for (i = 0; i < nfunix; i++)
 		if (funixn[i] && funix[i] != -1)
 			(void)unlink(funixn[i]);
 
@@ -2188,7 +2188,7 @@ void init(void)
 
 	lognum = 0;
 
-        /* Get hostname */
+	/* Get hostname */
 	(void) gethostname(LocalHostName, sizeof(LocalHostName));
 	LocalDomain = emptystring;
 	if ( (p = strchr(LocalHostName, '.')) ) {
@@ -2458,9 +2458,9 @@ void cfline(char *line, struct filed *f)
 					}
 					else if ( singlpri ) {
 						if ( ignorepri )
-				  			f->f_pmask[i] &= ~(1<<pri);
+							f->f_pmask[i] &= ~(1<<pri);
 						else
-				  			f->f_pmask[i] |= (1<<pri);
+							f->f_pmask[i] |= (1<<pri);
 					}
 					else
 					{
