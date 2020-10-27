@@ -1,0 +1,28 @@
+#!/bin/sh -efu
+
+. "$TOPDIR/tests/common.sh"
+
+WORKDIR="$1"
+
+prepare
+
+cat > "$WORKDIR/syslog.conf" <<EOF
+log_format: %H %t %h %m
+*.*     $WORKDIR/output/everything.log
+*.info  $WORKDIR/syslog-mark.log
+EOF
+
+run_syslogd &
+sleep 3
+
+for f in $facilities; do
+	for p in $priorities; do
+		logger \
+			--socket "$WORKDIR/log" \
+			--socket-errors=on \
+			-p "$f.$p" "TEST $f.$p"
+	done
+done
+
+wait_mark
+"$WORKDIR/check-hashes.sh" "$WORKDIR/output/everything.log"

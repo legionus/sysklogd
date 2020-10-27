@@ -53,6 +53,10 @@ MANDIR = $(prefix)/usr/share/man
 # file system standard.
 FSSTND = -DFSSTND
 
+# The following define determines whether the syslogd should create checksum
+# chains for log entries.
+USE_CHECKSUMS = -DUSE_CHECKSUMS
+
 # The following define establishes ownership for the man pages.
 # Avery tells me that there is a difference between Debian and
 # Slackware.  Rather than choose sides I am leaving it up to the user.
@@ -67,8 +71,8 @@ MAN_PERMS = 644
 # ballot below.
 SYSLOGD_PIDNAME = -DSYSLOGD_PIDNAME=\"syslogd.pid\"
 
-SYSLOGD_FLAGS= -DSYSLOG_INET -DSYSLOG_UNIXAF -DINET6 -DNO_SCCS ${FSSTND} \
-	${SYSLOGD_PIDNAME}
+SYSLOGD_FLAGS= -DSYSLOG_INET -DSYSLOG_UNIXAF -DINET6 -DNO_SCCS \
+	${USE_CHECKSUMS} ${FSSTND} ${SYSLOGD_PIDNAME}
 SYSLOG_FLAGS= -DALLOW_KERNEL_LOGGING
 KLOGD_FLAGS = ${FSSTND} ${KLOGD_START_DELAY}
 DEB =
@@ -79,6 +83,10 @@ TESTS = \
 	priority-exclusion \
 	priority-exclamation \
 	named-pipes
+
+ifneq (${USE_CHECKSUMS},)
+TESTS += log-hashes
+endif
 
 all: syslogd klogd
 
@@ -98,7 +106,7 @@ test:
 
 install: install_man install_exec
 
-syslogd: syslogd.o pidfile.o
+syslogd: syslogd.o pidfile.o block/sha256.o
 	${CC} ${LDFLAGS} -o $@ $^ ${LIBS}
 
 klogd:	klogd.o syslog.o pidfile.o

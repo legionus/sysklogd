@@ -61,6 +61,7 @@
 #include "pidfile.h"
 #include "version.h"
 #include "attribute.h"
+#include "hash.h"
 
 #if defined(__linux__)
 #include <paths.h>
@@ -186,6 +187,8 @@ struct filed {
 	int	f_prevcount;			/* repetition cnt of prevline */
 	int	f_repeatcount;			/* number of "repeated" msgs */
 	int	f_flags;			/* store some additional flags */
+	/* hash of last logged message */
+	char    f_prevhash[HASH_NAMESZ + 1 + HASH_HEXSZ + 1];
 };
 
 /*
@@ -292,6 +295,7 @@ struct sourceinfo {
 enum log_format_type {
 	LOG_FORMAT_NONE = 0,
 	LOG_FORMAT_BOL,
+	LOG_FORMAT_HASH,
 	LOG_FORMAT_TIME,
 	LOG_FORMAT_HOST,
 	LOG_FORMAT_MSG,
@@ -391,6 +395,7 @@ static void allocate_log(void);
 int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t, char *s, size_t n)
 	SYSKLOGD_NONNULL((1));
 int parse_log_format(struct log_format *log_fmt, char *s);
+void calculate_digest(struct filed *f, struct log_format *log_fmt);
 void sighup_handler(int);
 
 #ifdef SYSLOG_UNIXAF
@@ -1528,6 +1533,36 @@ void clear_record_fields(struct log_format *log_fmt)
 	}
 }
 
+void calculate_digest(struct filed *f, struct log_format *log_fmt)
+{
+	int i, n;
+	unsigned char digest[HASH_RAWSZ];
+	hash_ctx_t hash_ctx;
+
+	if (!(log_fmt->f_mask | (1 << LOG_FORMAT_HASH)))
+		return;
+
+	digest[0] = 0;
+
+	hash_init(&hash_ctx);
+	for (i = 0; i < LOG_FORMAT_IOVEC_MAX; i++)
+		hash_update(&hash_ctx, log_fmt->iov[i].iov_base, log_fmt->iov[i].iov_len);
+	hash_final(digest, &hash_ctx);
+
+	strncpy(f->f_prevhash, HASH_NAME, sizeof(f->f_prevhash));
+	n = HASH_NAMESZ;
+
+	strncpy(f->f_prevhash + n, ":", sizeof(f->f_prevhash) - n);
+	n += 1;
+
+	for (i = 0; i < HASH_RAWSZ; i++) {
+		snprintf(f->f_prevhash + n, sizeof(f->f_prevhash) - n, "%02x", digest[i]);
+		n += 2;
+	}
+	f->f_prevhash[n] = 0;
+	return;
+}
+
 void fprintlog(struct filed *f, char *from, int flags, char *msg)
 {
 	char repbuf[80];
@@ -1545,6 +1580,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 
 	set_record_field(&log_fmt, LOG_FORMAT_TIME, f->f_lasttime, 15);
 	set_record_field(&log_fmt, LOG_FORMAT_HOST, f->f_prevhost, -1);
+	set_record_field(&log_fmt, LOG_FORMAT_HASH, f->f_prevhash, -1);
 	if (msg) {
 		set_record_field(&log_fmt, LOG_FORMAT_MSG, msg, -1);
 	} else if (f->f_prevcount > 1) {
@@ -1690,6 +1726,8 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 		if (f->f_file == -1)
 			break;
 
+		calculate_digest(f, &log_fmt);
+
 		if (writev(f->f_file, log_fmt.iov, LOG_FORMAT_IOVEC_MAX) < 0) {
 			int e = errno;
 
@@ -1738,6 +1776,7 @@ void fprintlog(struct filed *f, char *from, int flags, char *msg)
 		f->f_time = now;
 		verbosef("\n");
 		set_record_field(&log_fmt, LOG_FORMAT_EOL, "\r\n", 2);
+		calculate_digest(f, &log_fmt);
 		wallmsg(f, &log_fmt);
 		break;
 	} /* switch */
@@ -2658,6 +2697,7 @@ static void allocate_log(void)
 	 */
 	++nlogs;
 	memset(&Files[nlogs], '\0', sizeof(struct filed));
+	strncpy(Files[nlogs].f_prevhash, EMPTY_HASH_LITERAL, sizeof(Files[nlogs].f_prevhash));
 	return;
 }
 
@@ -2754,6 +2794,7 @@ int parse_log_format(struct log_format *log_fmt, char *str)
 				case 't': f_type = LOG_FORMAT_TIME; break;
 				case 'h': f_type = LOG_FORMAT_HOST; break;
 				case 'm': f_type = LOG_FORMAT_MSG;  break;
+				case 'H': f_type = LOG_FORMAT_HASH; break;
 				case '%':
 					special = 0;
 					goto create_special;
