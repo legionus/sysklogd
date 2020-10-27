@@ -389,23 +389,57 @@ void doexit(int sig);
 void init();
 void cfline(char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
-static void verbosef(char *, ...)
+void verbosef(char *, ...)
 	SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
-static void allocate_log(void);
+void allocate_log(void);
 int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t, char *s, size_t n)
 	SYSKLOGD_NONNULL((1));
 int parse_log_format(struct log_format *log_fmt, char *s);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
 void sighup_handler(int);
+int set_nonblock_flag(int desc);
+int create_unix_socket(const char *path) SYSKLOGD_NONNULL((1));
+ssize_t recv_withcred(int s, void *buf, size_t len, int flags, pid_t *pid, uid_t *uid, gid_t *gid);
+int *create_inet_sockets(void);
+int drop_root(void);
+void add_funix_name(const char *fname) SYSKLOGD_NONNULL((1));
+void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
+char *textpri(int pri);
+
 
 #ifdef SYSLOG_UNIXAF
-static int create_unix_socket(const char *path);
-#endif
-#ifdef SYSLOG_INET
-static int *create_inet_sockets();
-#endif
+int create_unix_socket(const char *path)
+{
+	struct sockaddr_un sunx;
+	int fd;
+	char line[MAXLINE + 1];
+	int passcred = 1;
+	socklen_t sl = sizeof(passcred);
 
-static ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
+	if (path[0] == '\0')
+		return -1;
+
+	(void) unlink(path);
+
+	memset(&sunx, 0, sizeof(sunx));
+	sunx.sun_family = AF_UNIX;
+	(void) strncpy(sunx.sun_path, path, sizeof(sunx.sun_path) - 1);
+
+	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+	if (fd < 0 ||
+	    bind(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family)+strlen(sunx.sun_path)) < 0 ||
+	    chmod(path, 0666) < 0) {
+		(void) snprintf(line, sizeof(line), "cannot create %s", path);
+		logerror(line);
+		verbosef("cannot create %s (%d).\n", path, errno);
+		close(fd);
+		return -1;
+	}
+	setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &passcred, sl);
+	return fd;
+}
+
+ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 		pid_t *pid, uid_t *uid, gid_t *gid)
 {
 	struct cmsghdr *cmptr;
@@ -441,7 +475,7 @@ static ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 		if (gid)
 			*gid = ((struct ucred *) CMSG_DATA(cmptr))->gid;
 	} else
-#endif
+#endif // SCM_CREDENTIALS
 	{
 		if (pid)
 			*pid = (pid_t) -1;
@@ -453,8 +487,88 @@ static ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 
 	return rc;
 }
+#endif // SYSLOG_UNIXAF
 
-static int set_nonblock_flag(int desc)
+#ifdef SYSLOG_INET
+int *create_inet_sockets(void)
+{
+	struct addrinfo hints, *res, *r;
+	int error, maxs, *s, *socks;
+	int on = 1;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_flags = AI_PASSIVE;
+	hints.ai_family = family;
+	hints.ai_socktype = SOCK_DGRAM;
+
+	error = getaddrinfo(bind_addr, "syslog", &hints, &res);
+	if (error) {
+		logerror("network logging disabled (syslog/udp service unknown or address incompatible).");
+		logerror("see syslogd(8) for details of whether and how to enable it.");
+		logerror(gai_strerror(error));
+		return NULL;
+	}
+
+	/* Count max number of sockets we may open */
+	for (maxs = 0, r = res; r; r = r->ai_next, maxs++);
+	socks = malloc((maxs+1) * sizeof(int));
+	if (!socks) {
+		logerror("couldn't allocate memory for sockets");
+		die(0);
+	}
+
+	*socks = 0;	/* num of sockets counter at start of array */
+	s = socks + 1;
+	for (r = res; r; r = r->ai_next) {
+		*s = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
+		if (*s < 0) {
+			logerror("socket");
+			continue;
+		}
+		if (r->ai_family == AF_INET6) {
+			if (setsockopt(*s, IPPROTO_IPV6, IPV6_V6ONLY,
+				       (char *) &on, sizeof(on)) < 0) {
+				logerror("setsockopt (IPV6_ONLY), suspending IPv6");
+				close(*s);
+				continue;
+			}
+		}
+		if (setsockopt(*s, SOL_SOCKET, SO_REUSEADDR,
+			       (char *) &on, sizeof(on)) < 0 ) {
+			logerror("setsockopt(REUSEADDR), suspending inet");
+			close(*s);
+			continue;
+		}
+		/* We must not block on the network socket, in case a packet
+		 * gets lost between select and recv, otherise the process
+		 * will stall until the timeout, and other processes trying to
+		 * log will also stall.
+		 */
+		if (set_nonblock_flag(*s) == -1) {
+			logerror("fcntl(O_NONBLOCK), suspending inet");
+			close(*s);
+			continue;
+		}
+		if (bind(*s, r->ai_addr, r->ai_addrlen) < 0) {
+			logerror("bind, suspending inet");
+			close(*s);
+			continue;
+		}
+		(*socks)++;
+		s++;
+	}
+	if (res)
+		freeaddrinfo(res);
+	if (*socks == 0) {
+		logerror("no valid sockets, suspending inet");
+		free(socks);
+		return NULL;
+	}
+	return socks;
+}
+#endif // SYSLOG_INET
+
+int set_nonblock_flag(int desc)
 {
 	int flags = fcntl(desc, F_GETFL, 0);
 
@@ -464,7 +578,7 @@ static int set_nonblock_flag(int desc)
 	return fcntl(desc, F_SETFL, flags | O_NONBLOCK);
 }
 
-static int drop_root(void)
+int drop_root(void)
 {
 	struct passwd *pw;
 
@@ -484,7 +598,7 @@ static int drop_root(void)
 	return 0;
 }
 
-static void add_funix_name(const char *fname)
+void add_funix_name(const char *fname)
 {
 	unsigned i;
 
@@ -498,7 +612,7 @@ static void add_funix_name(const char *fname)
 		fprintf(stderr, "Out of descriptors, ignoring %s\n", fname);
 }
 
-static void add_funix_dir(const char *dname)
+void add_funix_dir(const char *dname)
 {
 	DIR *dir;
 	struct dirent *entry;
@@ -962,117 +1076,6 @@ int usage(void)
 	exit(1);
 }
 
-#ifdef SYSLOG_UNIXAF
-static int create_unix_socket(const char *path)
-{
-	struct sockaddr_un sunx;
-	int fd;
-	char line[MAXLINE +1];
-	int passcred = 1;
-	socklen_t sl = sizeof(passcred);
-
-	if (path[0] == '\0')
-		return -1;
-
-	(void) unlink(path);
-
-	memset(&sunx, 0, sizeof(sunx));
-	sunx.sun_family = AF_UNIX;
-	(void) strncpy(sunx.sun_path, path, sizeof(sunx.sun_path));
-	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-	if (fd < 0 || bind(fd, (struct sockaddr *) &sunx,
-			   sizeof(sunx.sun_family)+strlen(sunx.sun_path)) < 0 ||
-	    chmod(path, 0666) < 0) {
-		(void) snprintf(line, sizeof(line), "cannot create %s", path);
-		logerror(line);
-		verbosef("cannot create %s (%d).\n", path, errno);
-		close(fd);
-		return -1;
-	}
-	setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &passcred, sl);
-	return fd;
-}
-#endif
-
-#ifdef SYSLOG_INET
-static int *create_inet_sockets(void)
-{
-	struct addrinfo hints, *res, *r;
-	int error, maxs, *s, *socks;
-	int on = 1;
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_flags = AI_PASSIVE;
-	hints.ai_family = family;
-	hints.ai_socktype = SOCK_DGRAM;
-
-	error = getaddrinfo(bind_addr, "syslog", &hints, &res);
-	if (error) {
-		logerror("network logging disabled (syslog/udp service unknown or address incompatible).");
-		logerror("see syslogd(8) for details of whether and how to enable it.");
-		logerror(gai_strerror(error));
-		return NULL;
-	}
-
-	/* Count max number of sockets we may open */
-	for (maxs = 0, r = res; r; r = r->ai_next, maxs++);
-	socks = malloc((maxs+1) * sizeof(int));
-	if (!socks) {
-		logerror("couldn't allocate memory for sockets");
-		die(0);
-	}
-
-	*socks = 0;	/* num of sockets counter at start of array */
-	s = socks + 1;
-	for (r = res; r; r = r->ai_next) {
-		*s = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
-		if (*s < 0) {
-			logerror("socket");
-			continue;
-		}
-		if (r->ai_family == AF_INET6) {
-			if (setsockopt(*s, IPPROTO_IPV6, IPV6_V6ONLY,
-				       (char *) &on, sizeof(on)) < 0) {
-				logerror("setsockopt (IPV6_ONLY), suspending IPv6");
-				close(*s);
-				continue;
-			}
-		}
-		if (setsockopt(*s, SOL_SOCKET, SO_REUSEADDR,
-			       (char *) &on, sizeof(on)) < 0 ) {
-			logerror("setsockopt(REUSEADDR), suspending inet");
-			close(*s);
-			continue;
-		}
-		/* We must not block on the network socket, in case a packet
-		 * gets lost between select and recv, otherise the process
-		 * will stall until the timeout, and other processes trying to
-		 * log will also stall.
-		 */
-		if (set_nonblock_flag(*s) == -1) {
-			logerror("fcntl(O_NONBLOCK), suspending inet");
-			close(*s);
-			continue;
-		}
-		if (bind(*s, r->ai_addr, r->ai_addrlen) < 0) {
-			logerror("bind, suspending inet");
-			close(*s);
-			continue;
-		}
-		(*socks)++;
-		s++;
-	}
-	if (res)
-		freeaddrinfo(res);
-	if (*socks == 0) {
-		logerror("no valid sockets, suspending inet");
-		free(socks);
-		return NULL;
-	}
-	return socks;
-}
-#endif
-
 char **
 crunch_list(char *list)
 {
@@ -1261,7 +1264,7 @@ void printline(const struct sourceinfo *const source, char *msg)
 /*
  * Decode a priority into textual information like auth.emerg.
  */
-static char *textpri(int pri)
+char *textpri(int pri)
 {
 	static char res[20];
 	CODE *c_pri, *c_fac;
@@ -2642,7 +2645,7 @@ int decode(char *name, struct code *codetab)
 	return (-1);
 }
 
-static void verbosef(char *fmt, ...)
+void verbosef(char *fmt, ...)
 {
 	va_list ap;
 
@@ -2662,7 +2665,7 @@ static void verbosef(char *fmt, ...)
  * The following function is responsible for allocating/reallocating the
  * array which holds the structures which define the logging outputs.
  */
-static void allocate_log(void)
+void allocate_log(void)
 {
 	verbosef("Called allocate_log, nlogs = %d.\n", nlogs);
 
