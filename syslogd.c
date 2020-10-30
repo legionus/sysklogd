@@ -169,7 +169,7 @@ static int funix[MAXFUNIX]          = {
 
 struct filed {
 	short f_type;                        /* entry type, see below */
-	short f_file;                        /* file descriptor */
+	int f_file;                          /* file descriptor */
 	time_t f_time;                       /* time this was last written */
 	char *f_host;                        /* host from which to recd. */
 	u_char f_pmask[LOG_NFACILITIES + 1]; /* priority mask */
@@ -184,8 +184,8 @@ struct filed {
 	char f_prevline[MAXSVLINE];          /* last message logged */
 	char f_lasttime[16];                 /* time of last occurrence */
 	char f_prevhost[MAXHOSTNAMELEN + 1]; /* host from which recd. */
-	int f_prevpri;                       /* pri of f_prevline */
-	int f_prevlen;                       /* length of f_prevline */
+	unsigned int f_prevpri;              /* pri of f_prevline */
+	size_t f_prevlen;                    /* length of f_prevline */
 	int f_prevcount;                     /* repetition cnt of prevline */
 	int f_repeatcount;                   /* number of "repeated" msgs */
 	int f_flags;                         /* store some additional flags */
@@ -334,26 +334,26 @@ static int Debug;                              /* debug flag */
 static int Compress = 1;                       /* compress repeated messages flag */
 static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
-static const char *emptystring  = "";
-static int InetInuse            = 0;       /* non-zero if INET sockets are being used */
-static int *finet               = NULL;    /* Internet datagram sockets */
-static int Initialized          = 0;       /* set when we have initialized ourselves */
-static int LogFormatInitialized = 0;       /* set when we have initialized log_format */
-static int MarkInterval         = 20 * 60; /* interval between marks in seconds */
+static const char *emptystring   = "";
+static int InetInuse             = 0;       /* non-zero if INET sockets are being used */
+static int *finet                = NULL;    /* Internet datagram sockets */
+static int Initialized           = 0;       /* set when we have initialized ourselves */
+static int LogFormatInitialized  = 0;       /* set when we have initialized log_format */
+static unsigned int MarkInterval = 20 * 60; /* interval between marks in seconds */
 #ifdef INET6
 static int family = PF_UNSPEC; /* protocol family (IPv4, IPv6 or both) */
 #else
 static int family = PF_INET; /* protocol family (IPv4 only) */
 #endif
-static int send_to_all     = 0;    /* send message to all IPv4/IPv6 addresses */
-static int MarkSeq         = 0;    /* mark sequence number */
-static int LastAlarm       = 0;    /* last value passed to alarm() (seconds)  */
-static int DupesPending    = 0;    /* Number of unflushed duplicate messages */
-static int NoFork          = 0;    /* don't fork - don't run in daemon mode */
-static int AcceptRemote    = 0;    /* receive messages that come via UDP */
-static char **StripDomains = NULL; /* these domains may be stripped before writing logs */
-static char **LocalHosts   = NULL; /* these hosts are logged with their hostname */
-static int NoHops          = 1;    /* Can we bounce syslog messages through an
+static int send_to_all        = 0;    /* send message to all IPv4/IPv6 addresses */
+static unsigned int MarkSeq   = 0;    /* mark sequence number */
+static unsigned int LastAlarm = 0;    /* last value passed to alarm() (seconds)  */
+static int DupesPending       = 0;    /* Number of unflushed duplicate messages */
+static int NoFork             = 0;    /* don't fork - don't run in daemon mode */
+static int AcceptRemote       = 0;    /* receive messages that come via UDP */
+static char **StripDomains    = NULL; /* these domains may be stripped before writing logs */
+static char **LocalHosts      = NULL; /* these hosts are logged with their hostname */
+static int NoHops             = 1;    /* Can we bounce syslog messages through an
 					   intermediate host. */
 
 static char *bind_addr   = NULL; /* bind UDP port to this interface only */
@@ -371,20 +371,20 @@ int usage(void);
 void untty(void);
 void printchopped(const struct sourceinfo *const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo *const, char *msg);
-void logmsg(int pri, const char *msg, const struct sourceinfo *const, int flags);
+void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const, int flags);
 char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
     SYSKLOGD_NONNULL((1));
 void clear_record_fields(struct log_format *log_fmt)
     SYSKLOGD_NONNULL((1));
 void set_record_field(struct log_format *log_fmt, enum log_format_type name,
-		const char *value, ssize_t len)
+                      const char *value, ssize_t len)
     SYSKLOGD_NONNULL((1));
 void fprintlog(register struct filed *f, char *from, int flags, const char *msg);
 void endtty(int);
 void wallmsg(register struct filed *f, struct log_format *log_fmt);
 void reapchild(int);
-const char *cvtaddr(struct sockaddr_storage *f, int len);
-const char *cvthname(struct sockaddr_storage *f, int len);
+const char *cvtaddr(struct sockaddr_storage *f, unsigned int len);
+const char *cvthname(struct sockaddr_storage *f, unsigned int len);
 void domark(int);
 void debug_switch(int);
 void logerror(const char *fmt, ...)
@@ -398,7 +398,7 @@ void verbosef(const char *, ...)
     SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 void allocate_log(void);
 int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t,
-		const char *s, size_t n)
+                         const char *s, size_t n)
     SYSKLOGD_NONNULL((1));
 int parse_log_format(struct log_format *log_fmt, const char *s);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
@@ -410,7 +410,7 @@ int *create_inet_sockets(void);
 int drop_root(void);
 void add_funix_name(const char *fname) SYSKLOGD_NONNULL((1));
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
-char *textpri(int pri);
+char *textpri(unsigned int pri);
 
 #ifdef SYSLOG_UNIXAF
 int create_unix_socket(const char *path)
@@ -451,7 +451,7 @@ ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 	struct msghdr m;
 	struct iovec iov;
 	char control[CMSG_SPACE(sizeof(struct ucred))];
-	size_t rc;
+	ssize_t rc;
 
 	memset(&m, 0, sizeof(m));
 	memset(control, 0, sizeof(control));
@@ -497,8 +497,9 @@ ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 int *create_inet_sockets(void)
 {
 	struct addrinfo hints, *res, *r;
-	int error, maxs, *s, *socks;
+	int error, *s, *socks;
 	int on = 1;
+	size_t maxs;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags    = AI_PASSIVE;
@@ -646,7 +647,7 @@ void add_funix_dir(const char *dname)
 		if (S_ISLNK(st.st_mode)) {
 			const char *name;
 			char buf[MAXPATHLEN];
-			int n = readlink(entry->d_name, buf, sizeof(buf));
+			ssize_t n = readlink(entry->d_name, buf, sizeof(buf));
 
 			if ((n <= 0) || (n >= sizeof(buf)) || (buf[0] != '/'))
 				continue;
@@ -1127,7 +1128,7 @@ void untty(void)
 
 void printchopped(const struct sourceinfo *const source, char *msg, size_t len, int fd)
 {
-	auto int ptlngth;
+	auto size_t ptlngth;
 
 	auto char *start = msg,
 	          *p,
@@ -1189,11 +1190,11 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 void printline(const struct sourceinfo *const source, char *msg)
 {
 	register char *p, *q;
-	register unsigned char c;
+	register char c;
 	char line[MAXLINE + 1];
 	unsigned int pri; // Valid Priority values are 0-191
 	int prilen = 0;   // Track Priority value string len
-	int msglen;
+	size_t msglen;
 
 	/* test for special codes */
 	msglen = strlen(msg);
@@ -1240,7 +1241,7 @@ void printline(const struct sourceinfo *const source, char *msg)
 /*
  * Decode a priority into textual information like auth.emerg.
  */
-char *textpri(int pri)
+char *textpri(unsigned int pri)
 {
 	static char res[20];
 	CODE *c_pri, *c_fac;
@@ -1262,11 +1263,11 @@ static time_t now;
  * the priority.
  */
 
-void logmsg(int pri, const char *msg, const struct sourceinfo *const from, int flags)
+void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const from, int flags)
 {
 	register struct filed *f;
 	int fac, prilev, lognum;
-	int msglen;
+	size_t msglen;
 	char *timestamp;
 	char newmsg[MAXLINE + 1];
 	sigset_t mask;
@@ -1369,7 +1370,7 @@ void logmsg(int pri, const char *msg, const struct sourceinfo *const from, int f
 		}
 		/* We may place group membership check here */
 		if (from->uid != 0) {
-			int newlen = strlen(newmsg);
+			size_t newlen = strlen(newmsg);
 			snprintf(newmsg + newlen, sizeof(newmsg) - newlen,
 			         "(uid=%u) ", from->uid);
 		}
@@ -1423,7 +1424,7 @@ void logmsg(int pri, const char *msg, const struct sourceinfo *const from, int f
 			         (long) repeatinterval[f->f_repeatcount]);
 
 			if (f->f_prevcount == 1 && DupesPending++ == 0) {
-				int seconds;
+				unsigned int seconds;
 				verbosef("setting alarm to flush duplicate messages\n");
 
 				seconds = alarm(0);
@@ -1482,7 +1483,7 @@ finish:
 
 char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
 {
-	if (!(log_fmt->f_mask | (1 << name)))
+	if (!(log_fmt->f_mask | (1U << name)))
 		return NULL;
 
 	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
@@ -1497,7 +1498,7 @@ void set_record_field(struct log_format *log_fmt,
 {
 	size_t iov_len;
 
-	if (!(log_fmt->f_mask | (1 << name)))
+	if (!(log_fmt->f_mask | (1U << name)))
 		return;
 
 	iov_len = len == -1 ? strlen(value) : len;
@@ -1552,7 +1553,7 @@ void fprintlog(struct filed *f, char *from, int flags, const char *msg)
 {
 	char repbuf[80];
 #ifdef SYSLOG_INET
-	register int l;
+	register size_t l;
 	char line[MAXLINE + 1];
 	time_t fwd_suspend;
 	struct addrinfo hints, *ai;
@@ -1657,7 +1658,7 @@ void fprintlog(struct filed *f, char *from, int flags, const char *msg)
 				err = -1;
 				for (ai = f->f_un.f_forw.f_addr; ai; ai = ai->ai_next) {
 					for (i = 0; i < *finet; i++) {
-						int lsent;
+						ssize_t lsent;
 						lsent = sendto(finet[i + 1], line, l, 0,
 						               ai->ai_addr, ai->ai_addrlen);
 						if (lsent == l) {
@@ -1882,7 +1883,7 @@ void reapchild(int sig)
 	errno = saved_errno;
 }
 
-const char *cvtaddr(struct sockaddr_storage *f, int len)
+const char *cvtaddr(struct sockaddr_storage *f, unsigned int len)
 {
 	static char ip[NI_MAXHOST];
 
@@ -1901,7 +1902,7 @@ const char *cvtaddr(struct sockaddr_storage *f, int len)
  * Callers of cvthname() need to know that if NULL is returned then
  * the host is to be ignored.
  */
-const char *cvthname(struct sockaddr_storage *f, int len)
+const char *cvthname(struct sockaddr_storage *f, unsigned int len)
 {
 	static char hname[NI_MAXHOST];
 	int error;
@@ -2674,7 +2675,7 @@ int set_log_format_field(struct log_format *log_fmt, size_t i,
 			return -1;
 		}
 
-		log_fmt->f_mask |= (1 << t);
+		log_fmt->f_mask |= (1U << t);
 		log_fmt->fields[log_fmt->fields_nr].f_type = t;
 		log_fmt->fields[log_fmt->fields_nr].f_iov  = log_fmt->iov + i;
 		log_fmt->fields_nr++;
@@ -2690,7 +2691,8 @@ int set_log_format_field(struct log_format *log_fmt, size_t i,
 int parse_log_format(struct log_format *log_fmt, const char *str)
 {
 	const char *ptr, *start;
-	int i, special, field_nr;
+	int i, special;
+	size_t field_nr;
 	struct log_format new_fmt = { 0 };
 
 	iovec_max = sysconf(_SC_IOV_MAX);
@@ -2790,7 +2792,7 @@ int parse_log_format(struct log_format *log_fmt, const char *str)
 	create_field:
 		if ((ptr - start - 1) > 0 &&
 		    set_log_format_field(&new_fmt, field_nr++,
-		                         LOG_FORMAT_NONE, start, (ptr - start - 1)) < 0)
+		                         LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
 			goto error;
 
 		if (set_log_format_field(&new_fmt, field_nr++, f_type, NULL, 0) < 0)
@@ -2800,7 +2802,7 @@ int parse_log_format(struct log_format *log_fmt, const char *str)
 		goto next;
 	create_special:
 		if (set_log_format_field(&new_fmt, field_nr++,
-		                         LOG_FORMAT_NONE, start, (ptr - start - 1)) < 0)
+		                         LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
 			goto error;
 
 		start = ptr;
@@ -2814,7 +2816,7 @@ int parse_log_format(struct log_format *log_fmt, const char *str)
 
 	if (start != ptr &&
 	    set_log_format_field(&new_fmt, field_nr++,
-	                         LOG_FORMAT_NONE, start, (ptr - start)) < 0)
+	                         LOG_FORMAT_NONE, start, (size_t)(ptr - start)) < 0)
 		goto error;
 
 	if (set_log_format_field(&new_fmt, field_nr++,
