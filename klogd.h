@@ -29,5 +29,5 @@
 #undef vsyslog
 
 /* Function prototypes. */
-extern void Syslog(int priority, char *fmt, ...)
+extern void Syslog(int priority, const char *fmt, ...)
 	SYSKLOGD_FORMAT((__printf__, 2, 3)) SYSKLOGD_NONNULL((2));

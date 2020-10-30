@@ -54,9 +54,9 @@ _syscall3(int,ksyslog,int, type, char *, buf, int, len);
 #define LOG_LINE_LENGTH 1000
 
 #if defined(FSSTND)
-static char	*PidFile = _PATH_VARRUN "klogd.pid";
+static const char	*PidFile = _PATH_VARRUN "klogd.pid";
 #else
-static char	*PidFile = "/etc/klogd.pid";
+static const  char	*PidFile = "/etc/klogd.pid";
 #endif
 
 static int	kmsg,
@@ -261,7 +261,7 @@ static enum LOGSRC GetKernelLogSrc(void)
 	return(proc);
 }
 
-void Syslog(int priority, char *fmt, ...)
+void Syslog(int priority, const char *fmt, ...)
 {
 	va_list ap;
 	char *argl;

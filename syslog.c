@@ -114,7 +114,7 @@ __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
 		v->iov_base = stdp;
 		v->iov_len = cnt - (stdp - tbuf);
 		++v;
-		v->iov_base = "\n";
+		v->iov_base = (void *) "\n";
 		v->iov_len = 1;
 
 		if (writev(2, iov, 2) < 0)

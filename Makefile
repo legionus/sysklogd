@@ -22,7 +22,7 @@ CC= gcc
 #LDFLAGS= -g
 SKFLAGS= $(RPM_OPT_FLAGS) -D_GNU_SOURCE -O3 -fomit-frame-pointer -fno-strength-reduce \
 	 -Wall -Wstrict-prototypes -Wmissing-declarations -Wmissing-prototypes \
-	 -Wmissing-format-attribute -Wdisabled-optimization
+	 -Wmissing-format-attribute -Wdisabled-optimization -Wwrite-strings
 # -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 # -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE
 # $(shell getconf LFS_SKFLAGS)

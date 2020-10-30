@@ -120,9 +120,9 @@
 #define _PATH_DEVNULL "/dev/null"
 #endif
 
-static char *ConfFile = _PATH_LOGCONF;
-static char *PidFile  = _PATH_LOGPID;
-static char ctty[]    = _PATH_CONSOLE;
+static const char *ConfFile = _PATH_LOGCONF;
+static const char *PidFile  = _PATH_LOGPID;
+static const char ctty[]    = _PATH_CONSOLE;
 
 static char **parts;
 
@@ -224,7 +224,7 @@ static time_t repeatinterval[] = { 30, 60 }; /* # of secs before flush */
 #define F_FORW_SUSP 7 /* suspended host forwarding */
 #define F_FORW_UNKN 8 /* unknown host forwarding */
 #define F_PIPE      9 /* named pipe */
-static char *TypeNames[] = {
+static const char *TypeNames[] = {
 	"UNUSED", "FILE", "TTY", "CONSOLE",
 	"FORW", "USERS", "WALL", "FORW(SUSPENDED)",
 	"FORW(UNKNOWN)", "PIPE"
@@ -234,7 +234,7 @@ static struct filed *Files = (struct filed *) 0;
 static struct filed consfile;
 
 struct code {
-	char *c_name;
+	const char *c_name;
 	int c_val;
 };
 
@@ -333,8 +333,8 @@ static long int iovec_max        = 0;
 static int Debug;                              /* debug flag */
 static int Compress = 1;                       /* compress repeated messages flag */
 static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
-static char *LocalDomain;                      /* our local domain name */
-static char *emptystring        = "";
+static const char *LocalDomain;                /* our local domain name */
+static const char *emptystring  = "";
 static int InetInuse            = 0;       /* non-zero if INET sockets are being used */
 static int *finet               = NULL;    /* Internet datagram sockets */
 static int Initialized          = 0;       /* set when we have initialized ourselves */
@@ -371,14 +371,15 @@ int usage(void);
 void untty(void);
 void printchopped(const struct sourceinfo *const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo *const, char *msg);
-void logmsg(int pri, char *msg, const struct sourceinfo *const, int flags);
+void logmsg(int pri, const char *msg, const struct sourceinfo *const, int flags);
 char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
     SYSKLOGD_NONNULL((1));
 void clear_record_fields(struct log_format *log_fmt)
     SYSKLOGD_NONNULL((1));
-void set_record_field(struct log_format *log_fmt, enum log_format_type name, char *value, ssize_t len)
+void set_record_field(struct log_format *log_fmt, enum log_format_type name,
+		const char *value, ssize_t len)
     SYSKLOGD_NONNULL((1));
-void fprintlog(register struct filed *f, char *from, int flags, char *msg);
+void fprintlog(register struct filed *f, char *from, int flags, const char *msg);
 void endtty(int);
 void wallmsg(register struct filed *f, struct log_format *log_fmt);
 void reapchild(int);
@@ -391,14 +392,15 @@ void logerror(const char *fmt, ...)
 void die(int sig);
 void doexit(int sig);
 void init(void);
-void cfline(char *line, register struct filed *f);
+void cfline(const char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
-void verbosef(char *, ...)
+void verbosef(const char *, ...)
     SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 void allocate_log(void);
-int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t, char *s, size_t n)
+int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t,
+		const char *s, size_t n)
     SYSKLOGD_NONNULL((1));
-int parse_log_format(struct log_format *log_fmt, char *s);
+int parse_log_format(struct log_format *log_fmt, const char *s);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
 void sighup_handler(int);
 int set_nonblock_flag(int desc);
@@ -1260,7 +1262,7 @@ static time_t now;
  * the priority.
  */
 
-void logmsg(int pri, char *msg, const struct sourceinfo *const from, int flags)
+void logmsg(int pri, const char *msg, const struct sourceinfo *const from, int flags)
 {
 	register struct filed *f;
 	int fac, prilev, lognum;
@@ -1491,7 +1493,7 @@ char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
 }
 
 void set_record_field(struct log_format *log_fmt,
-                      enum log_format_type name, char *value, ssize_t len)
+                      enum log_format_type name, const char *value, ssize_t len)
 {
 	size_t iov_len;
 
@@ -1502,7 +1504,7 @@ void set_record_field(struct log_format *log_fmt,
 
 	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
 		if (log_fmt->fields[i].f_type == name) {
-			log_fmt->fields[i].f_iov->iov_base = value;
+			log_fmt->fields[i].f_iov->iov_base = (void *) value;
 			log_fmt->fields[i].f_iov->iov_len  = iov_len;
 		}
 	}
@@ -1546,7 +1548,7 @@ void calculate_digest(struct filed *f, struct log_format *log_fmt)
 	return;
 }
 
-void fprintlog(struct filed *f, char *from, int flags, char *msg)
+void fprintlog(struct filed *f, char *from, int flags, const char *msg)
 {
 	char repbuf[80];
 #ifdef SYSLOG_INET
@@ -2352,10 +2354,10 @@ void init(void)
 /*
  * Crack a configuration file line
  */
-void cfline(char *line, struct filed *f)
+void cfline(const char *line, struct filed *f)
 {
-	register char *p;
-	register char *q;
+	register const char *p;
+	register const char *q;
 	register int i, i2;
 	char *bp;
 	int pri;
@@ -2605,7 +2607,7 @@ int decode(char *name, struct code *codetab)
 	return (-1);
 }
 
-void verbosef(char *fmt, ...)
+void verbosef(const char *fmt, ...)
 {
 	va_list ap;
 
@@ -2659,7 +2661,7 @@ void allocate_log(void)
 }
 
 int set_log_format_field(struct log_format *log_fmt, size_t i,
-                         enum log_format_type t, char *s, size_t n)
+                         enum log_format_type t, const char *s, size_t n)
 {
 	if (i >= iovec_max) {
 		logerror("Too many parts in the log_format string");
@@ -2678,16 +2680,16 @@ int set_log_format_field(struct log_format *log_fmt, size_t i,
 		log_fmt->fields_nr++;
 	}
 
-	log_fmt->iov[i].iov_base = s;
+	log_fmt->iov[i].iov_base = (void *) s;
 	log_fmt->iov[i].iov_len  = n;
 	log_fmt->iovec_nr++;
 
 	return 0;
 }
 
-int parse_log_format(struct log_format *log_fmt, char *str)
+int parse_log_format(struct log_format *log_fmt, const char *str)
 {
-	char *ptr, *start;
+	const char *ptr, *start;
 	int i, special, field_nr;
 	struct log_format new_fmt = { 0 };
 
