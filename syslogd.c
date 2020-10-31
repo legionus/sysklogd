@@ -379,7 +379,8 @@ void clear_record_fields(struct log_format *log_fmt)
 void set_record_field(struct log_format *log_fmt, enum log_format_type name,
                       const char *value, ssize_t len)
     SYSKLOGD_NONNULL((1));
-void fprintlog(register struct filed *f, char *from, int flags, const char *msg);
+void fprintlog(register struct filed *f, const struct sourceinfo *const source,
+               int flags, const char *msg);
 void endtty(int);
 void wallmsg(register struct filed *f, struct log_format *log_fmt);
 void reapchild(int);
@@ -1388,7 +1389,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 
 		if (f->f_file >= 0) {
 			untty();
-			fprintlog(f, (char *) from->hostname, flags, msg);
+			fprintlog(f, from, flags, msg);
 			(void) close(f->f_file);
 			f->f_file = -1;
 		}
@@ -1442,13 +1443,13 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			 * in the future.
 			 */
 			if (now > REPEATTIME(f)) {
-				fprintlog(f, (char *) from->hostname, flags, (char *) NULL);
+				fprintlog(f, from, flags, (char *) NULL);
 				BACKOFF(f);
 			}
 		} else {
 			/* new line, save it */
 			if (f->f_prevcount) {
-				fprintlog(f, (char *) from->hostname, 0, (char *) NULL);
+				fprintlog(f, from, 0, (char *) NULL);
 
 				if (--DupesPending == 0) {
 					verbosef("unsetting duplicate message flush alarm\n");
@@ -1469,11 +1470,11 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			if (msglen < MAXSVLINE) {
 				f->f_prevlen = msglen;
 				(void) strcpy(f->f_prevline, msg);
-				fprintlog(f, (char *) from->hostname, flags, (char *) NULL);
+				fprintlog(f, from, flags, (char *) NULL);
 			} else {
 				f->f_prevline[0] = 0;
 				f->f_prevlen     = 0;
-				fprintlog(f, (char *) from->hostname, flags, msg);
+				fprintlog(f, from, flags, msg);
 			}
 		}
 	}
@@ -1549,7 +1550,8 @@ void calculate_digest(struct filed *f, struct log_format *log_fmt)
 	return;
 }
 
-void fprintlog(struct filed *f, char *from, int flags, const char *msg)
+void fprintlog(struct filed *f, const struct sourceinfo *const from,
+               int flags, const char *msg)
 {
 	char repbuf[80];
 #ifdef SYSLOG_INET
@@ -1645,7 +1647,7 @@ void fprintlog(struct filed *f, char *from, int flags, const char *msg)
 			 */
 		f_forw:
 			verbosef(" %s\n", f->f_un.f_forw.f_hname);
-			if (strcmp(from, LocalHostName) && NoHops)
+			if (strcmp(from->hostname, LocalHostName) && NoHops)
 				verbosef("Not sending message to remote.\n");
 			else if (finet) {
 				int i;
@@ -1988,7 +1990,7 @@ void domark(int sig)
 			verbosef("flush %s: repeated %d times, %ld sec.\n",
 			         TypeNames[f->f_type], f->f_prevcount,
 			         (long) repeatinterval[f->f_repeatcount]);
-			fprintlog(f, LocalHostName, 0, (char *) NULL);
+			fprintlog(f, &source, 0, (char *) NULL);
 			BACKOFF(f);
 			DupesPending--;
 		}
@@ -2069,7 +2071,7 @@ void die(int sig)
 		f = &Files[lognum];
 		/* flush any pending output */
 		if (f->f_prevcount)
-			fprintlog(f, LocalHostName, 0, (char *) NULL);
+			fprintlog(f, &source, 0, (char *) NULL);
 	}
 
 	Initialized = was_initialized;
@@ -2142,7 +2144,7 @@ void init(void)
 
 			/* flush any pending output */
 			if (f->f_prevcount)
-				fprintlog(f, LocalHostName, 0, (char *) NULL);
+				fprintlog(f, &source, 0, (char *) NULL);
 
 			switch (f->f_type) {
 				case F_FILE:
