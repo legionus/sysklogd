@@ -302,6 +302,9 @@ enum log_format_type {
 	LOG_FORMAT_HASH,
 	LOG_FORMAT_TIME,
 	LOG_FORMAT_HOST,
+	LOG_FORMAT_PID,
+	LOG_FORMAT_UID,
+	LOG_FORMAT_GID,
 	LOG_FORMAT_MSG,
 	LOG_FORMAT_EOL,
 	LOG_FORMAT_COUNTS,
@@ -804,7 +807,7 @@ int main(int argc, char **argv)
 	if (funix_dir && *funix_dir)
 		add_funix_dir(funix_dir);
 
-	if (parse_log_format(&log_fmt, "%t %h %m") < 0)
+	if (parse_log_format(&log_fmt, "%t %h (uid=%u) %m") < 0)
 		exit(1);
 
 	if (!(Debug || NoFork)) {
@@ -1370,11 +1373,6 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 				         "%s[%u]: ", tag, from->pid);
 		}
 		/* We may place group membership check here */
-		if (from->uid != 0) {
-			size_t newlen = strlen(newmsg);
-			snprintf(newmsg + newlen, sizeof(newmsg) - newlen,
-			         "(uid=%u) ", from->uid);
-		}
 		/* XXX: Silent truncation is possible */
 		strncat(newmsg, msg, sizeof(newmsg) - 1 - strlen(newmsg));
 		msg    = newmsg;
@@ -1561,6 +1559,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 	struct addrinfo hints, *ai;
 	int err;
 #endif
+	char s_uid[20], s_gid[20], s_pid[20];
 
 	verbosef("Called fprintlog, ");
 
@@ -1569,6 +1568,16 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 	set_record_field(&log_fmt, LOG_FORMAT_TIME, f->f_lasttime, 15);
 	set_record_field(&log_fmt, LOG_FORMAT_HOST, f->f_prevhost, -1);
 	set_record_field(&log_fmt, LOG_FORMAT_HASH, f->f_prevhash, -1);
+
+	snprintf(s_uid, sizeof(s_uid), "%d", from->uid);
+	set_record_field(&log_fmt, LOG_FORMAT_UID, s_uid, -1);
+
+	snprintf(s_gid, sizeof(s_gid), "%d", from->gid);
+	set_record_field(&log_fmt, LOG_FORMAT_GID, s_gid, -1);
+
+	snprintf(s_pid, sizeof(s_pid), "%d", from->pid);
+	set_record_field(&log_fmt, LOG_FORMAT_PID, s_pid, -1);
+
 	if (msg) {
 		set_record_field(&log_fmt, LOG_FORMAT_MSG, msg, -1);
 	} else if (f->f_prevcount > 1) {
@@ -2772,6 +2781,15 @@ int parse_log_format(struct log_format *log_fmt, const char *str)
 					break;
 				case 'm':
 					f_type = LOG_FORMAT_MSG;
+					break;
+				case 'u':
+					f_type = LOG_FORMAT_UID;
+					break;
+				case 'g':
+					f_type = LOG_FORMAT_GID;
+					break;
+				case 'p':
+					f_type = LOG_FORMAT_PID;
 					break;
 				case 'H':
 					f_type = LOG_FORMAT_HASH;

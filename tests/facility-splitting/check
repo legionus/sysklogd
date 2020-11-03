@@ -7,6 +7,7 @@ WORKDIR="$1"
 prepare
 
 {
+	printf 'log_format: %s\n' "%t %h %m"
 	for n in $facilities; do
 		rm -f -- "$WORKDIR/output/syslog-$n.log"
 		printf '%s.*\t%s\n' "$n" "$WORKDIR/output/syslog-$n.log"

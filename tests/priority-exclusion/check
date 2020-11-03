@@ -7,6 +7,7 @@ WORKDIR="$1"
 prepare
 
 cat > "$WORKDIR/syslog.conf" <<EOF
+log_format: %t %h %m
 *.=crit;local0.none     $WORKDIR/output/critical.log
 *.=crit                 $WORKDIR/output/critical-all.log
 local0.*;local0.!=info  $WORKDIR/output/local0.log

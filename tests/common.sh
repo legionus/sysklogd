@@ -24,6 +24,7 @@ run_syslogd()
 		-p "$WORKDIR/log" \
 		-P "$WORKDIR/syslog.d" \
 		-f "$WORKDIR/syslog.conf" \
+		"$@" \
 		>"$WORKDIR/syslogd.log" 2>&1
 }
 

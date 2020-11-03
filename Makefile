@@ -85,7 +85,8 @@ TESTS = \
 	priority-splitting \
 	priority-exclusion \
 	priority-exclamation \
-	named-pipes
+	named-pipes \
+	compress-repeated-messages
 
 ifneq (${USE_CHECKSUMS},)
 TESTS += log-hashes

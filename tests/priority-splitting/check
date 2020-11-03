@@ -7,6 +7,7 @@ WORKDIR="$1"
 prepare
 
 {
+	printf 'log_format: %s\n' "%t %h %m"
 	for p in $priorities; do
 		printf '*.%s\t%s\n' "$p" "$WORKDIR/output/syslog-$p.log"
 	done

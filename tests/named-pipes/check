@@ -7,6 +7,7 @@ WORKDIR="$1"
 prepare
 
 cat > "$WORKDIR/syslog.conf" <<EOF
+log_format: %t %h %m
 local0.*                |$WORKDIR/pipe
 *.info                  $WORKDIR/syslog-mark.log
 EOF
