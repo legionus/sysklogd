@@ -2652,13 +2652,15 @@ void allocate_log(void)
 			return;
 		}
 	} else {
+		struct filed *newFiles;
 		/* Re-allocate the array. */
-		Files = (struct filed *) realloc(Files, (nlogs + 2) *
+		newFiles = (struct filed *) realloc(Files, (nlogs + 2) *
 		                                            sizeof(struct filed));
-		if (Files == (struct filed *) 0) {
+		if (!newFiles) {
 			logerror("Cannot grow log structure.");
 			return;
 		}
+		Files = newFiles;
 	}
 
 	/*
