@@ -636,7 +636,6 @@ void add_funix_dir(const char *dname)
 	if (!(dir = opendir("."))) {
 		fprintf(stderr, "opendir: %s: %s\n", dname, strerror(errno));
 		exit(1);
-		return;
 	}
 
 	while ((entry = readdir(dir))) {
