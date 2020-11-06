@@ -1255,7 +1255,7 @@ char *textpri(unsigned int pri)
 	for (c_pri = prioritynames; c_pri->c_name && !(c_pri->c_val == LOG_PRI(pri)); c_pri++)
 		;
 
-	snprintf(res, sizeof(res), "%s.%s<%d>", c_fac->c_name, c_pri->c_name, pri);
+	snprintf(res, sizeof(res), "%s.%s<%u>", c_fac->c_name, c_pri->c_name, pri);
 
 	return res;
 }
@@ -1661,7 +1661,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 			else if (finet) {
 				int i;
 				f->f_time = now;
-				(void) snprintf(line, sizeof(line), "<%d>%s", f->f_prevpri,
+				(void) snprintf(line, sizeof(line), "<%u>%s", f->f_prevpri,
 				                (char *) log_fmt.iov[LOG_FORMAT_MSG].iov_base);
 				l = strlen(line);
 				if (l > MAXLINE)
