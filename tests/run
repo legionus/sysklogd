@@ -1,5 +1,5 @@
 #!/bin/sh -efu
 
 exec unshare \
-	--pid --fork --map-root-user --mount-proc \
+	--pid --user --fork --map-root-user --mount-proc \
 	"$TOPDIR/tests/$1/check" "$TOPDIR/tests/$1"
