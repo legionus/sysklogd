@@ -441,7 +441,6 @@ int create_unix_socket(const char *path)
 {
 	struct sockaddr_un sunx;
 	int fd;
-	char line[MAXLINE + 1];
 	int passcred = 1;
 	socklen_t sl = sizeof(passcred);
 
@@ -458,8 +457,7 @@ int create_unix_socket(const char *path)
 	if (fd < 0 ||
 	    bind(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family) + strlen(sunx.sun_path)) < 0 ||
 	    chmod(path, 0666) < 0) {
-		(void) snprintf(line, sizeof(line), "cannot create %s", path);
-		logerror(line);
+		logerror("cannot create %s", path);
 		verbosef("cannot create %s (%d).\n", path, errno);
 		close(fd);
 		return -1;
@@ -534,7 +532,7 @@ int *create_inet_sockets(void)
 	if (error) {
 		logerror("network logging disabled (syslog/udp service unknown or address incompatible).");
 		logerror("see syslogd(8) for details of whether and how to enable it.");
-		logerror(gai_strerror(error));
+		logerror("%s", gai_strerror(error));
 		return NULL;
 	}
 
@@ -1771,7 +1769,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 					f->f_file = open(f->f_un.f_fname, O_WRONLY | O_APPEND | O_NOCTTY);
 					if (f->f_file < 0) {
 						f->f_type = F_UNUSED;
-						logerror(f->f_un.f_fname);
+						logerror("%s", f->f_un.f_fname);
 					} else {
 						untty();
 						goto again;
@@ -1781,7 +1779,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 				} else {
 					f->f_type = F_UNUSED;
 					errno     = e;
-					logerror(f->f_un.f_fname);
+					logerror("%s", f->f_un.f_fname);
 				}
 			} else if (f->f_type == F_FILE && (f->f_flags & SYNC_FILE))
 				(void) fsync(f->f_file);
