@@ -416,6 +416,26 @@ void add_funix_name(const char *fname) SYSKLOGD_NONNULL((1));
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
 char *textpri(unsigned int pri);
 
+static size_t safe_strncpy(char *dest, const char *src, size_t size)
+{
+	size_t ret = strlen(src);
+
+	if (size) {
+		size_t len = (ret >= size) ? size - 1 : ret;
+		memcpy(dest, src, len);
+		dest[len] = '\0';
+	}
+	return ret;
+}
+
+static size_t safe_strncat(char *d, const char *s, size_t n)
+{
+	size_t l = strnlen(d, n);
+	if (l == n)
+		return l + strlen(s);
+	return l + safe_strncpy(d+l, s, n-l);
+}
+
 #ifdef SYSLOG_UNIXAF
 int create_unix_socket(const char *path)
 {
@@ -432,7 +452,7 @@ int create_unix_socket(const char *path)
 
 	memset(&sunx, 0, sizeof(sunx));
 	sunx.sun_family = AF_UNIX;
-	(void) strncpy(sunx.sun_path, path, sizeof(sunx.sun_path) - 1);
+	safe_strncpy(sunx.sun_path, path, sizeof(sunx.sun_path));
 
 	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (fd < 0 ||
@@ -874,10 +894,10 @@ int main(int argc, char **argv)
 	} /* if ( !Debug ) */
 
 	consfile.f_type = F_CONSOLE;
-	(void) strcpy(consfile.f_un.f_fname, ctty);
+	safe_strncpy(consfile.f_un.f_fname, ctty, sizeof(consfile.f_un.f_fname));
 
 	/* Initialization is done by init() */
-	(void) strcpy(LocalHostName, emptystring);
+	safe_strncpy(LocalHostName, emptystring, sizeof(LocalHostName));
 	LocalDomain = emptystring;
 
 	(void) signal(SIGTERM, die);
@@ -1142,7 +1162,7 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 	tmpline[0] = '\0';
 	if (parts[fd] != (char *) 0) {
 		verbosef("Including part from messages.\n");
-		strcpy(tmpline, parts[fd]);
+		safe_strncpy(tmpline, parts[fd], sizeof(tmpline));
 		free(parts[fd]);
 		parts[fd] = (char *) 0;
 		if ((strlen(msg) + strlen(tmpline)) > MAXLINE) {
@@ -1152,7 +1172,7 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 		} else {
 			verbosef("Previous: %s\n", tmpline);
 			verbosef("Next: %s\n", msg);
-			strcat(tmpline, msg); /* length checked above */
+			safe_strncat(tmpline, msg, sizeof(tmpline)); /* length checked above */
 			printline(source, tmpline);
 			if ((strlen(msg) + 1) == len)
 				return;
@@ -1170,7 +1190,7 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 		if ((parts[fd] = malloc(ptlngth + 1)) == (char *) 0)
 			logerror("Cannot allocate memory for message part.");
 		else {
-			strcpy(parts[fd], p);
+			safe_strncpy(parts[fd], p, ptlngth + 1);
 			verbosef("Saving partial msg: %s\n", parts[fd]);
 			memset(p, '\0', ptlngth);
 		}
@@ -1324,7 +1344,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		newmsg[0] = '\0';
 
 		tag[0] = '\0';
-		strncat(tag, msg, sizeof(tag) - 1);
+		safe_strncat(tag, msg, sizeof(tag));
 
 		p = strchr(tag, ':');
 		if (!(oldpid = strchr(tag, '[')) || (p && p < oldpid)) {
@@ -1373,7 +1393,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		}
 		/* We may place group membership check here */
 		/* XXX: Silent truncation is possible */
-		strncat(newmsg, msg, sizeof(newmsg) - 1 - strlen(newmsg));
+		safe_strncat(newmsg, msg, sizeof(newmsg) - strlen(newmsg));
 		msg    = newmsg;
 		msglen = strlen(msg);
 	}
@@ -1415,7 +1435,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		if (Compress && (flags & MARK) == 0 && msglen == f->f_prevlen &&
 		    !strcmp(msg, f->f_prevline) &&
 		    !strcmp(from->hostname, f->f_prevhost)) {
-			(void) strncpy(f->f_lasttime, timestamp, 15);
+			safe_strncpy(f->f_lasttime, timestamp, sizeof(f->f_lasttime));
 			f->f_prevcount++;
 			verbosef("msg repeated %d times, %ld sec of %ld.\n",
 			         f->f_prevcount, now - f->f_time,
@@ -1460,13 +1480,12 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			f->f_prevpri     = pri;
 			f->f_repeatcount = 0;
 
-			(void) strncpy(f->f_lasttime, timestamp, 15);
-			(void) strncpy(f->f_prevhost, from->hostname,
-			               sizeof(f->f_prevhost));
+			safe_strncpy(f->f_lasttime, timestamp, sizeof(f->f_lasttime));
+			safe_strncpy(f->f_prevhost, from->hostname, sizeof(f->f_prevhost));
 
 			if (msglen < MAXSVLINE) {
 				f->f_prevlen = msglen;
-				(void) strcpy(f->f_prevline, msg);
+				safe_strncpy(f->f_prevline, msg, sizeof(f->f_prevline));
 				fprintlog(f, from, flags, (char *) NULL);
 			} else {
 				f->f_prevline[0] = 0;
@@ -1533,10 +1552,10 @@ void calculate_digest(struct filed *f, struct log_format *log_fmt)
 		hash_update(&hash_ctx, log_fmt->iov[i].iov_base, log_fmt->iov[i].iov_len);
 	hash_final(digest, &hash_ctx);
 
-	strncpy(f->f_prevhash, HASH_NAME, sizeof(f->f_prevhash));
+	safe_strncpy(f->f_prevhash, HASH_NAME, sizeof(f->f_prevhash));
 	n = HASH_NAMESZ;
 
-	strncpy(f->f_prevhash + n, ":", sizeof(f->f_prevhash) - n);
+	safe_strncpy(f->f_prevhash + n, ":", sizeof(f->f_prevhash) - n);
 	n += 1;
 
 	for (i = 0; i < HASH_RAWSZ; i++) {
@@ -1854,7 +1873,7 @@ void wallmsg(struct filed *f, struct log_format *log_fmt)
 			}
 
 			/* compute the device name */
-			strcpy(p, _PATH_DEV);
+			safe_strncpy(p, _PATH_DEV, sizeof(p));
 			strncat(p, ut.ut_line, UNAMESZ);
 
 			if (setjmp(ttybuf) == 0) {
@@ -2029,7 +2048,7 @@ void logerror(const char *fmt, ...)
 	struct sourceinfo source;
 	int sv_errno = errno;
 
-	strncpy(buf, "syslogd: ", sizeof(buf));
+	safe_strncpy(buf, "syslogd: ", sizeof(buf));
 
 	va_start(ap, fmt);
 	vsnprintf(buf + 9, sizeof(buf) - 9, fmt, ap);
@@ -2515,7 +2534,7 @@ void cfline(const char *line, struct filed *f)
 	switch (*p) {
 		case '@':
 #ifdef SYSLOG_INET
-			(void) strcpy(f->f_un.f_forw.f_hname, ++p);
+			safe_strncpy(f->f_un.f_forw.f_hname, ++p, sizeof(f->f_un.f_forw.f_hname));
 			verbosef("forwarding host: %s\n", p); /*ASP*/
 			memset(&hints, 0, sizeof(hints));
 			hints.ai_family   = family;
@@ -2540,7 +2559,7 @@ void cfline(const char *line, struct filed *f)
 
 		case '|':
 		case '/':
-			(void) strcpy(f->f_un.f_fname, p);
+			safe_strncpy(f->f_un.f_fname, p, sizeof(f->f_un.f_fname));
 			verbosef("filename: %s\n", p); /*ASP*/
 			if (syncfile)
 				f->f_flags |= SYNC_FILE;
@@ -2577,7 +2596,7 @@ void cfline(const char *line, struct filed *f)
 			for (i = 0; i < MAXUNAMES && *p; i++) {
 				for (q = p; *q && *q != ',';)
 					q++;
-				(void) strncpy(f->f_un.f_uname[i], p, UNAMESZ);
+				safe_strncpy(f->f_un.f_uname[i], p, UNAMESZ);
 				if ((q - p) > UNAMESZ)
 					f->f_un.f_uname[i][UNAMESZ] = '\0';
 				else
@@ -2606,7 +2625,7 @@ int decode(char *name, struct code *codetab)
 		verbosef("\n");
 		return (atoi(name));
 	}
-	(void) strncpy(buf, name, 79);
+	safe_strncpy(buf, name, sizeof(buf));
 	for (p = buf; *p; p++)
 		if (isupper(*p))
 			*p = tolower(*p);
@@ -2669,7 +2688,7 @@ void allocate_log(void)
 	 */
 	++nlogs;
 	memset(&Files[nlogs], '\0', sizeof(struct filed));
-	strncpy(Files[nlogs].f_prevhash, EMPTY_HASH_LITERAL, sizeof(Files[nlogs].f_prevhash));
+	safe_strncpy(Files[nlogs].f_prevhash, EMPTY_HASH_LITERAL, sizeof(Files[nlogs].f_prevhash));
 	return;
 }
 
