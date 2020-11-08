@@ -415,6 +415,8 @@ int *create_inet_sockets(void);
 int drop_root(void);
 void add_funix_name(const char *fname) SYSKLOGD_NONNULL((1));
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
+void set_internal_sinfo(struct sourceinfo *source) SYSKLOGD_NONNULL((1));
+
 char *textpri(unsigned int pri);
 
 static size_t safe_strncpy(char *dest, const char *src, size_t size)
@@ -1963,16 +1965,24 @@ const char *cvthname(struct sockaddr_storage *f, unsigned int len)
 	return (hname);
 }
 
+void set_internal_sinfo(struct sourceinfo *source)
+{
+	memset(source, '\0', sizeof(*source));
+
+	source->flags    = SINFO_ISINTERNAL;
+	source->hostname = LocalHostName;
+	source->uid      = geteuid();
+	source->gid      = getegid();
+	source->pid      = getpid();
+}
+
 void domark(int sig)
 {
 	register struct filed *f;
 	int lognum;
 	struct sourceinfo source;
 
-	memset(&source, '\0', sizeof(source));
-
-	source.flags    = SINFO_ISINTERNAL;
-	source.hostname = LocalHostName;
+	set_internal_sinfo(&source);
 
 	if (MarkInterval > 0) {
 		now = time(NULL);
@@ -2036,10 +2046,7 @@ void logerror(const char *fmt, ...)
 		return;
 	}
 
-	memset(&source, '\0', sizeof(source));
-
-	source.flags    = SINFO_ISINTERNAL;
-	source.hostname = LocalHostName;
+	set_internal_sinfo(&source);
 
 	logmsg(LOG_SYSLOG | LOG_ERR, buf, &source, ADDDATE);
 	errno = 0;
@@ -2055,10 +2062,7 @@ void die(int sig)
 	int was_initialized = Initialized;
 	struct sourceinfo source;
 
-	memset(&source, '\0', sizeof(source));
-
-	source.flags    = SINFO_ISINTERNAL;
-	source.hostname = LocalHostName;
+	set_internal_sinfo(&source);
 
 	Initialized = 0; /* Don't log SIGCHLDs in case we
 			   receive one during exiting */
@@ -2122,10 +2126,7 @@ void init(void)
 	struct hostent *hent;
 	struct sourceinfo source;
 
-	memset(&source, '\0', sizeof(source));
-
-	source.flags    = SINFO_ISINTERNAL;
-	source.hostname = LocalHostName;
+	set_internal_sinfo(&source);
 
 	/*
 	 *  Close all open log files and free log descriptor array.
