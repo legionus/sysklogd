@@ -647,12 +647,12 @@ void add_funix_dir(const char *dname)
 	struct dirent *entry;
 
 	if (chdir(dname)) {
-		fprintf(stderr, "chdir: %s: %s\n", dname, strerror(errno));
+		fprintf(stderr, "chdir: %s: %m\n", dname);
 		return;
 	}
 
 	if (!(dir = opendir("."))) {
-		fprintf(stderr, "opendir: %s: %s\n", dname, strerror(errno));
+		fprintf(stderr, "opendir: %s: %m\n", dname);
 		exit(1);
 	}
 
@@ -683,7 +683,7 @@ void add_funix_dir(const char *dname)
 	}
 
 	if (closedir(dir))
-		fprintf(stderr, "closedir: %s: %s\n", dname, strerror(errno));
+		fprintf(stderr, "closedir: %s: %m\n", dname);
 	if (chdir("/") < 0) {
 		fprintf(stderr, "syslogd: chdir to / failed: %m");
 		exit(1);
@@ -833,8 +833,7 @@ int main(int argc, char **argv)
 			pid_t pid;
 
 			if ((fd = open(_PATH_DEVNULL, O_RDWR)) < 0) {
-				fprintf(stderr, "syslogd: %s: %s\n",
-				        _PATH_DEVNULL, strerror(errno));
+				fprintf(stderr, "syslogd: %s: %m\n", _PATH_DEVNULL);
 				exit(1);
 			}
 
@@ -1034,8 +1033,8 @@ int main(int argc, char **argv)
 					sinfo.hostname = LocalHostName;
 					printchopped(&sinfo, line, msglen + 2, fd);
 				} else if (msglen < 0 && errno != EINTR) {
-					verbosef("UNIX socket error: %d = %s.\n",
-					         errno, strerror(errno));
+					verbosef("UNIX socket error: %d = %m.\n",
+					         errno);
 					logerror("recvfrom UNIX");
 				}
 			}
@@ -1063,8 +1062,8 @@ int main(int argc, char **argv)
 						printchopped(&sinfo, line,
 						             msglen + 2, finet[i + 1]);
 					} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
-						verbosef("INET socket error: %d = %s.\n",
-						         errno, strerror(errno));
+						verbosef("INET socket error: %d = %m.\n",
+						         errno);
 						logerror("recvfrom inet");
 						/* should be harmless now that we set
 						 * BSDCOMPAT on the socket */
@@ -1698,10 +1697,10 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 						break;
 				}
 				if (err != -1) {
-					verbosef("INET sendto error: %d = %s.\n",
-					         err, strerror(err));
 					f->f_type = F_FORW_SUSP;
 					errno     = err;
+					verbosef("INET sendto error: %d = %m.\n",
+					         errno);
 					logerror("sendto");
 				}
 			}
