@@ -458,8 +458,7 @@ int create_unix_socket(const char *path)
 	if (fd < 0 ||
 	    bind(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family) + strlen(sunx.sun_path)) < 0 ||
 	    chmod(path, 0666) < 0) {
-		logerror("cannot create %s", path);
-		verbosef("cannot create %s (%d).\n", path, errno);
+		logerror("cannot create %s: %m", path);
 		close(fd);
 		return -1;
 	}
@@ -551,20 +550,18 @@ int *create_inet_sockets(void)
 	for (r = res; r; r = r->ai_next) {
 		*s = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
 		if (*s < 0) {
-			logerror("socket");
+			logerror("socket: %m");
 			continue;
 		}
 		if (r->ai_family == AF_INET6) {
-			if (setsockopt(*s, IPPROTO_IPV6, IPV6_V6ONLY,
-			               (char *) &on, sizeof(on)) < 0) {
-				logerror("setsockopt (IPV6_ONLY), suspending IPv6");
+			if (setsockopt(*s, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) < 0) {
+				logerror("setsockopt (IPV6_ONLY), suspending IPv6: %m");
 				close(*s);
 				continue;
 			}
 		}
-		if (setsockopt(*s, SOL_SOCKET, SO_REUSEADDR,
-		               (char *) &on, sizeof(on)) < 0) {
-			logerror("setsockopt(REUSEADDR), suspending inet");
+		if (setsockopt(*s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+			logerror("setsockopt(REUSEADDR), suspending inet: %m");
 			close(*s);
 			continue;
 		}
@@ -574,13 +571,13 @@ int *create_inet_sockets(void)
 		 * will stall until the timeout, and other processes trying to
 		 * log will also stall.
 		 */
-		if (set_nonblock_flag(*s) == -1) {
-			logerror("fcntl(O_NONBLOCK), suspending inet");
+		if (set_nonblock_flag(*s) < 0) {
+			logerror("fcntl(O_NONBLOCK), suspending inet: %m");
 			close(*s);
 			continue;
 		}
 		if (bind(*s, r->ai_addr, r->ai_addrlen) < 0) {
-			logerror("bind, suspending inet");
+			logerror("bind, suspending inet: %m");
 			close(*s);
 			continue;
 		}
@@ -900,9 +897,8 @@ int main(int argc, char **argv)
 	/* Create a partial message table for all file descriptors. */
 	num_fds = getdtablesize();
 	verbosef("Allocated parts table for %d file descriptors.\n", num_fds);
-	if ((parts = (char **) malloc(num_fds * sizeof(char *))) ==
-	    (char **) 0) {
-		logerror("Cannot allocate memory for message parts table.");
+	if (!(parts = malloc(num_fds * sizeof(char *)))) {
+		logerror("cannot allocate memory for message parts table.");
 
 		if (getpid() != ppid)
 			kill(ppid, SIGTERM);
@@ -987,7 +983,7 @@ int main(int argc, char **argv)
 		}
 		if (nfds < 0) {
 			if (errno != EINTR)
-				logerror("select");
+				logerror("select: %m");
 			verbosef("Select interrupted.\n");
 			continue;
 		}
@@ -1022,9 +1018,7 @@ int main(int argc, char **argv)
 					sinfo.hostname = LocalHostName;
 					printchopped(&sinfo, line, msglen + 2, fd);
 				} else if (msglen < 0 && errno != EINTR) {
-					verbosef("UNIX socket error: %d = %m.\n",
-					         errno);
-					logerror("recvfrom UNIX");
+					logerror("recvfrom UNIX socket: %m");
 				}
 			}
 		}
@@ -1051,9 +1045,7 @@ int main(int argc, char **argv)
 						printchopped(&sinfo, line,
 						             msglen + 2, finet[i + 1]);
 					} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
-						verbosef("INET socket error: %d = %m.\n",
-						         errno);
-						logerror("recvfrom inet");
+						logerror("recvfrom INET socket: %m");
 						/* should be harmless now that we set
 						 * BSDCOMPAT on the socket */
 						sleep(1);
@@ -1149,7 +1141,7 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 		free(parts[fd]);
 		parts[fd] = (char *) 0;
 		if ((strlen(msg) + strlen(tmpline)) > MAXLINE) {
-			logerror("Cannot glue message parts together");
+			logerror("cannot glue message parts together");
 			printline(source, tmpline);
 			start = msg;
 		} else {
@@ -1171,7 +1163,7 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 		if (*p == '\0') p++;
 		ptlngth = strlen(p);
 		if ((parts[fd] = malloc(ptlngth + 1)) == (char *) 0)
-			logerror("Cannot allocate memory for message part.");
+			logerror("cannot allocate memory for message part.");
 		else {
 			safe_strncpy(parts[fd], p, ptlngth + 1);
 			verbosef("Saving partial msg: %s\n", parts[fd]);
@@ -1685,9 +1677,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 				if (err != -1) {
 					f->f_type = F_FORW_SUSP;
 					errno     = err;
-					verbosef("INET sendto error: %d = %m.\n",
-					         errno);
-					logerror("sendto");
+					logerror("sendto: %m");
 				}
 			}
 			break;
@@ -1754,7 +1744,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 					f->f_file = open(f->f_un.f_fname, O_WRONLY | O_APPEND | O_NOCTTY);
 					if (f->f_file < 0) {
 						f->f_type = F_UNUSED;
-						logerror("%s", f->f_un.f_fname);
+						logerror("open: %s: %m", f->f_un.f_fname);
 					} else {
 						untty();
 						goto again;
@@ -1764,7 +1754,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 				} else {
 					f->f_type = F_UNUSED;
 					errno     = e;
-					logerror("%s", f->f_un.f_fname);
+					logerror("writev: %s: %m", f->f_un.f_fname);
 				}
 			} else if (f->f_type == F_FILE && (f->f_flags & SYNC_FILE))
 				(void) fsync(f->f_file);
@@ -2034,19 +2024,15 @@ void logerror(const char *fmt, ...)
 	safe_strncpy(buf, "syslogd: ", sizeof(buf));
 
 	va_start(ap, fmt);
+	errno = sv_errno;
 	vsnprintf(buf + 9, sizeof(buf) - 9, fmt, ap);
 	va_end(ap);
 
-	verbosef("Called logerror: %s\n", buf);
-
-	if (sv_errno != 0) {
-		size_t bufsz = strlen(buf);
-		if (strerror_r(sv_errno, buf + bufsz, sizeof(buf) - bufsz))
-			errno = 0; // ignore
-	}
+	verbosef("%s\n", buf);
 
 	if (!LogFormatInitialized) {
 		fputs(buf, stderr);
+		errno = 0;
 		return;
 	}
 
@@ -2557,7 +2543,7 @@ void cfline(const char *line, struct filed *f)
 
 			if (f->f_file < 0) {
 				f->f_file = -1;
-				logerror("Error opening log file: %s", p);
+				logerror("Error opening log file: %s: %m", p);
 				break;
 			}
 			if (isatty(f->f_file)) {
@@ -2648,18 +2634,17 @@ void allocate_log(void)
 	 * grow.
 	 */
 	if (nlogs == -1) {
-		Files = (struct filed *) malloc(sizeof(struct filed));
-		if (Files == (void *) 0) {
-			logerror("Cannot initialize log structure.");
+		Files = malloc(sizeof(struct filed));
+		if (!Files) {
+			logerror("cannot initialize log structure.");
 			return;
 		}
 	} else {
 		struct filed *newFiles;
 		/* Re-allocate the array. */
-		newFiles = (struct filed *) realloc(Files, (nlogs + 2) *
-		                                            sizeof(struct filed));
+		newFiles = realloc(Files, (nlogs + 2) * sizeof(struct filed));
 		if (!newFiles) {
-			logerror("Cannot grow log structure.");
+			logerror("cannot grow log structure.");
 			return;
 		}
 		Files = newFiles;
