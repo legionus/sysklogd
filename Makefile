@@ -145,6 +145,9 @@ install_man:
 	${INSTALL} -o ${MAN_USER} -g ${MAN_GROUP} -m ${MAN_PERMS} syslog.conf.5 ${MANDIR}/man5/syslog.conf.5
 	${INSTALL} -o ${MAN_USER} -g ${MAN_GROUP} -m ${MAN_PERMS} klogd.8 ${MANDIR}/man8/klogd.8
 
+format:
+	clang-format -style=file -i *.c *.h
+
 obj-m += oops.o
 
 oops.ko: oops.c

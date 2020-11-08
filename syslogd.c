@@ -436,7 +436,7 @@ static size_t safe_strncat(char *d, const char *s, size_t n)
 	size_t l = strnlen(d, n);
 	if (l == n)
 		return l + strlen(s);
-	return l + safe_strncpy(d+l, s, n-l);
+	return l + safe_strncpy(d + l, s, n - l);
 }
 
 #ifdef SYSLOG_UNIXAF

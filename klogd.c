@@ -39,46 +39,48 @@
 #define __LIBRARY__
 #include <linux/unistd.h>
 #if !defined(__GLIBC__)
-# define __NR_ksyslog __NR_syslog
-_syscall3(int,ksyslog,int, type, char *, buf, int, len);
+#define __NR_ksyslog __NR_syslog
+_syscall3(int, ksyslog, int, type, char *, buf, int, len);
 #else
 #include <sys/klog.h>
 #define ksyslog klogctl
 #endif
 
 #ifndef _PATH_DEVNULL
-#define _PATH_DEVNULL	"/dev/null"
+#define _PATH_DEVNULL "/dev/null"
 #endif
 
 #define LOG_BUFFER_SIZE 4096
 #define LOG_LINE_LENGTH 1000
 
 #if defined(FSSTND)
-static const char	*PidFile = _PATH_VARRUN "klogd.pid";
+static const char *PidFile = _PATH_VARRUN "klogd.pid";
 #else
-static const  char	*PidFile = "/etc/klogd.pid";
+static const char *PidFile = "/etc/klogd.pid";
 #endif
 
-static int	kmsg,
-		change_state = 0,
-		caught_TSTP = 0,
-		console_log_level = -1;
+static int kmsg,
+    change_state      = 0,
+    caught_TSTP       = 0,
+    console_log_level = -1;
 
-static int	use_syscall = 0,
-		one_shot = 0,
-		no_fork = 0;	/* don't fork - don't run in daemon mode */
+static int use_syscall = 0,
+           one_shot    = 0,
+           no_fork     = 0; /* don't fork - don't run in daemon mode */
 
-static char	log_buffer[LOG_BUFFER_SIZE];
+static char log_buffer[LOG_BUFFER_SIZE];
 
 static FILE *output_file = (FILE *) 0;
 
-static enum LOGSRC {none, proc, kernel} logsrc;
+static enum LOGSRC { none,
+	             proc,
+	             kernel } logsrc;
 
 int debugging = 0;
 
 static char *server_user = NULL;
-static char *chroot_dir = NULL;
-static int log_flags = 0;
+static char *chroot_dir  = NULL;
+static int log_flags     = 0;
 
 /* Function prototypes. */
 extern int ksyslog(int type, char *buf, int len);
@@ -92,12 +94,10 @@ static void LogKernelLine(void);
 static void LogProcLine(void);
 extern int main(int argc, char *argv[]);
 
-
 static void CloseLogSrc(void)
 {
 	/* Shutdown the log sources. */
-	switch ( logsrc )
-	{
+	switch (logsrc) {
 		case kernel:
 			ksyslog(0, 0, 0);
 			Syslog(LOG_INFO, "Kernel logging (ksyslog) stopped.");
@@ -110,61 +110,56 @@ static void CloseLogSrc(void)
 			break;
 	}
 
-	if ( output_file != (FILE *) 0 )
+	if (output_file != (FILE *) 0)
 		fflush(output_file);
 	return;
 }
-
 
 /*
  * Signal handler to terminate the parent process.
  */
 static void doexit(int sig)
 {
-	exit (0);
+	exit(0);
 }
 
 static void restart(int sig)
 {
 	signal(SIGCONT, restart);
 	change_state = 1;
-	caught_TSTP = 0;
+	caught_TSTP  = 0;
 	return;
 }
-
 
 static void stop_logging(int sig)
 {
 	signal(SIGTSTP, stop_logging);
 	change_state = 1;
-	caught_TSTP = 1;
+	caught_TSTP  = 1;
 	return;
 }
-
 
 static void stop_daemon(int sig)
 {
 	Terminate();
 }
 
-
 static void reload_daemon(int sig)
 {
 	change_state = 1;
 
-	if ( sig == SIGUSR2 )
+	if (sig == SIGUSR2)
 		signal(SIGUSR2, reload_daemon);
 	else
 		signal(SIGUSR1, reload_daemon);
 }
-
 
 static void Terminate(void)
 {
 	CloseLogSrc();
 	Syslog(LOG_INFO, "Kernel log daemon terminating.");
 	sleep(1);
-	if ( output_file != (FILE *) 0 )
+	if (output_file != (FILE *) 0)
 		fclose(output_file);
 	closelog();
 	(void) remove_pid(PidFile);
@@ -177,18 +172,16 @@ static void SignalDaemon(int sig)
 	kill(pid, sig);
 }
 
-
 static void ChangeLogging(void)
 {
 	/* Indicate that something is happening. */
-	Syslog(LOG_INFO, "klogd %s.%s, ---------- state change ----------\n", \
+	Syslog(LOG_INFO, "klogd %s.%s, ---------- state change ----------\n",
 	       VERSION, PATCHLEVEL);
 
 	/* Stop kernel logging. */
-	if ( caught_TSTP == 1 )
-	{
+	if (caught_TSTP == 1) {
 		CloseLogSrc();
-		logsrc = none;
+		logsrc       = none;
 		change_state = 0;
 		return;
 	}
@@ -201,29 +194,25 @@ static void ChangeLogging(void)
 	 * kernel log state as to what is causing us to restart.  Somewhat
 	 * groady but it keeps us from creating another static variable.
 	 */
-	if ( logsrc != none )
-	{
+	if (logsrc != none) {
 		Syslog(LOG_INFO, "Kernel logging re-started after SIGSTOP.");
 		change_state = 0;
 		return;
 	}
 
 	/* Restart logging. */
-	logsrc = GetKernelLogSrc();
+	logsrc       = GetKernelLogSrc();
 	change_state = 0;
 	return;
 }
-
 
 static enum LOGSRC GetKernelLogSrc(void)
 {
 	struct stat sb;
 
 	/* Set level of kernel console messaging.. */
-	if ( (console_log_level != -1)
-	&& (ksyslog(8, NULL, console_log_level) < 0) && \
-	     (errno == EINVAL) )
-	{
+	if ((console_log_level != -1) && (ksyslog(8, NULL, console_log_level) < 0) &&
+	    (errno == EINVAL)) {
 		/*
 		 * An invalid arguement error probably indicates that
 		 * a pre-0.14 kernel is being run.  At this point we
@@ -231,7 +220,7 @@ static enum LOGSRC GetKernelLogSrc(void)
 		 * logging completely.
 		 */
 		Syslog(LOG_WARNING, "Cannot set console log level - disabling "
-		       "console output.");
+		                    "console output.");
 	}
 
 	/*
@@ -240,25 +229,25 @@ static enum LOGSRC GetKernelLogSrc(void)
 	 */
 	if (!server_user &&
 	    (use_syscall ||
-	    ((stat(_PATH_KLOG, &sb) < 0) && (errno == ENOENT))))
-	{
+	     ((stat(_PATH_KLOG, &sb) < 0) && (errno == ENOENT)))) {
 		/* Initialize kernel logging. */
 		ksyslog(1, NULL, 0);
 		Syslog(LOG_INFO, "klogd %s.%s, log source = ksyslog "
-		       "started.", VERSION, PATCHLEVEL);
-		return(kernel);
+		                 "started.",
+		       VERSION, PATCHLEVEL);
+		return (kernel);
 	}
 
-	if ( (kmsg = open(_PATH_KLOG, O_RDONLY)) < 0 )
-	{
-		fprintf(stderr, "klogd: Cannot open proc file system, " \
-			"%d - %s.\n", errno, strerror(errno));
+	if ((kmsg = open(_PATH_KLOG, O_RDONLY)) < 0) {
+		fprintf(stderr, "klogd: Cannot open proc file system, "
+		                "%d - %s.\n",
+		        errno, strerror(errno));
 		ksyslog(7, NULL, 0);
 		exit(1);
 	}
-	Syslog(LOG_INFO, "klogd %s.%s, log source = %s started.", \
+	Syslog(LOG_INFO, "klogd %s.%s, log source = %s started.",
 	       VERSION, PATCHLEVEL, _PATH_KLOG);
-	return(proc);
+	return (proc);
 }
 
 void Syslog(int priority, const char *fmt, ...)
@@ -266,16 +255,14 @@ void Syslog(int priority, const char *fmt, ...)
 	va_list ap;
 	char *argl;
 
-	if ( debugging )
-	{
+	if (debugging) {
 		fputs("Logging line:\n", stderr);
 		fprintf(stderr, "\tLine: %s\n", fmt);
 		fprintf(stderr, "\tPriority: %d\n", priority);
 	}
 
 	/* Handle output to a file. */
-	if ( output_file != (FILE *) 0 )
-	{
+	if (output_file != (FILE *) 0) {
 		va_start(ap, fmt);
 		vfprintf(output_file, fmt, ap);
 		va_end(ap);
@@ -287,38 +274,35 @@ void Syslog(int priority, const char *fmt, ...)
 	}
 
 	/* Output using syslog. */
-	if (!strcmp(fmt, "%s"))
-	{
+	if (!strcmp(fmt, "%s")) {
 		va_start(ap, fmt);
 		argl = va_arg(ap, char *);
-		if (argl[0] == '<' && argl[1] && argl[2] == '>')
-		{
-			switch ( argl[1] )
-			{
-			case '0':
-				priority = LOG_EMERG;
-				break;
-			case '1':
-				priority = LOG_ALERT;
-				break;
-			case '2':
-				priority = LOG_CRIT;
-				break;
-			case '3':
-				priority = LOG_ERR;
-				break;
-			case '4':
-				priority = LOG_WARNING;
-				break;
-			case '5':
-				priority = LOG_NOTICE;
-				break;
-			case '6':
-				priority = LOG_INFO;
-				break;
-			case '7':
-			default:
-				priority = LOG_DEBUG;
+		if (argl[0] == '<' && argl[1] && argl[2] == '>') {
+			switch (argl[1]) {
+				case '0':
+					priority = LOG_EMERG;
+					break;
+				case '1':
+					priority = LOG_ALERT;
+					break;
+				case '2':
+					priority = LOG_CRIT;
+					break;
+				case '3':
+					priority = LOG_ERR;
+					break;
+				case '4':
+					priority = LOG_WARNING;
+					break;
+				case '5':
+					priority = LOG_NOTICE;
+					break;
+				case '6':
+					priority = LOG_INFO;
+					break;
+				case '7':
+				default:
+					priority = LOG_DEBUG;
 			}
 			argl += 3;
 		}
@@ -334,7 +318,6 @@ void Syslog(int priority, const char *fmt, ...)
 	return;
 }
 
-
 /*
  *     Copy characters from ptr to line until a char in the delim
  *     string is encountered or until min( space, len ) chars have
@@ -342,16 +325,16 @@ void Syslog(int priority, const char *fmt, ...)
  *
  *     Returns the actual number of chars copied.
  */
-static int copyin( char *line,      int space,
-                   const char *ptr, int len,
-                   const char *delim )
+static int copyin(char *line, int space,
+                  const char *ptr, int len,
+                  const char *delim)
 {
 	auto int i;
 	auto int count;
 
 	count = len < space ? len : space;
 
-	for(i = 0; i < count && !strchr(delim, *ptr); i++ ) {
+	for (i = 0; i < count && !strchr(delim, *ptr); i++) {
 		*line++ = *ptr++;
 	}
 
@@ -366,59 +349,55 @@ static void LogLine(char *ptr, int len)
 {
 	static char line_buff[LOG_LINE_LENGTH];
 	static char *line = line_buff;
-	static int space = sizeof(line_buff)-1;
+	static int space  = sizeof(line_buff) - 1;
 
 	int delta = 0; /* number of chars copied        */
 
-	while( len > 0 )
-	{
-		if( space == 0 )    /* line buffer is full */
+	while (len > 0) {
+		if (space == 0) /* line buffer is full */
 		{
 			/*
 			 ** Line too long.  Start a new line.
 			 */
-			*line = 0;   /* force null terminator */
+			*line = 0; /* force null terminator */
 
-			if ( debugging )
-			{
+			if (debugging) {
 				fputs("Line buffer full:\n", stderr);
 				fprintf(stderr, "\tLine: %s\n", line);
 			}
 
-			Syslog( LOG_INFO, "%s", line_buff );
+			Syslog(LOG_INFO, "%s", line_buff);
 			line  = line_buff;
-			space = sizeof(line_buff)-1;
+			space = sizeof(line_buff) - 1;
 		}
 
 		delta = copyin(line, space, ptr, len, "\n");
-		line  += delta;
-		ptr   += delta;
+		line += delta;
+		ptr += delta;
 		space -= delta;
-		len   -= delta;
+		len -= delta;
 
-		if( space == 0 || len == 0 )
-			; /* full line_buff or end of input buffer */
-		else if( *ptr == '\0' )  /* zero byte */
+		if (space == 0 || len == 0)
+			;              /* full line_buff or end of input buffer */
+		else if (*ptr == '\0') /* zero byte */
 		{
-			ptr++;	/* skip zero byte */
+			ptr++; /* skip zero byte */
 			space -= 1;
-			len   -= 1;
-		}
-		else if( *ptr == '\n' )  /* newline */
+			len -= 1;
+		} else if (*ptr == '\n') /* newline */
 		{
-			ptr++;	/* skip newline */
+			ptr++; /* skip newline */
 			space -= 1;
-			len   -= 1;
+			len -= 1;
 
-			*line = 0;  /* force null terminator */
+			*line = 0; /* force null terminator */
 
-			Syslog( LOG_INFO, "%s", line_buff );
+			Syslog(LOG_INFO, "%s", line_buff);
 			line  = line_buff;
-			space = sizeof(line_buff)-1;
+			space = sizeof(line_buff) - 1;
 		}
 	}
 }
-
 
 static void LogKernelLine(void)
 {
@@ -431,18 +410,16 @@ static void LogKernelLine(void)
 	 * messages into this fresh buffer.
 	 */
 	memset(log_buffer, '\0', sizeof(log_buffer));
-	if ( (rdcnt = ksyslog(2, log_buffer, sizeof(log_buffer)-1)) < 0 )
-	{
-		if ( errno == EINTR )
+	if ((rdcnt = ksyslog(2, log_buffer, sizeof(log_buffer) - 1)) < 0) {
+		if (errno == EINTR)
 			return;
-		fprintf(stderr, "klogd: Error return from sys_sycall: " \
-			"%d - %s\n", errno, strerror(errno));
-	}
-	else
+		fprintf(stderr, "klogd: Error return from sys_sycall: "
+		                "%d - %s\n",
+		        errno, strerror(errno));
+	} else
 		LogLine(log_buffer, rdcnt);
 	return;
 }
-
 
 static void LogProcLine(void)
 {
@@ -455,23 +432,20 @@ static void LogProcLine(void)
 	 * from the message pseudo-file into this fresh buffer.
 	 */
 	memset(log_buffer, '\0', sizeof(log_buffer));
-	if ( (rdcnt = read(kmsg, log_buffer, sizeof(log_buffer)-1)) < 0 )
-	{
+	if ((rdcnt = read(kmsg, log_buffer, sizeof(log_buffer) - 1)) < 0) {
 		int saved_errno = errno;
 
-		if ( errno == EINTR )
+		if (errno == EINTR)
 			return;
-		Syslog(LOG_ERR, "Cannot read proc file system: %d - %s.", \
+		Syslog(LOG_ERR, "Cannot read proc file system: %d - %s.",
 		       errno, strerror(errno));
-		if ( saved_errno == EPERM )
+		if (saved_errno == EPERM)
 			Terminate();
-	}
-	else
+	} else
 		LogLine(log_buffer, rdcnt);
 
 	return;
 }
-
 
 static int drop_root(void)
 {
@@ -493,68 +467,66 @@ static int drop_root(void)
 	return 0;
 }
 
-
 int main(int argc, char *argv[])
 {
-	auto int	ch,
-			use_output = 0;
+	auto int ch,
+	    use_output = 0;
 
-	auto char	*log_level = (char *) 0,
-			*output = (char *) 0;
+	auto char *log_level = (char *) 0,
+	          *output    = (char *) 0;
 
 	pid_t ppid = getpid();
-	if (chdir ("/") < 0) {
+	if (chdir("/") < 0) {
 		fprintf(stderr, "klogd: chdir to / failed: %m");
 		exit(1);
 	}
 
 	/* Parse the command-line. */
 	while ((ch = getopt(argc, argv, "c:df:u:j:iIk:nopsvx2")) != EOF)
-		switch((char)ch)
-		{
-		    case '2':		/* Print lines with symbols twice. */
-			break;
-		    case 'c':		/* Set console message level. */
-			log_level = optarg;
-			break;
-		    case 'd':		/* Activity debug mode. */
-			debugging = 1;
-			break;
-		    case 'f':		/* Define an output file. */
-			output = optarg;
-			use_output++;
-			break;
-		    case 'i':		/* Reload module symbols. */
-			SignalDaemon(SIGUSR1);
-			return(0);
-		    case 'I':
-			SignalDaemon(SIGUSR2);
-			return(0);
-		    case 'j':		/* chroot 'j'ail */
-			chroot_dir = optarg;
-			log_flags |= LOG_NDELAY;
-			break;
-		    case 'k':		/* Kernel symbol file. */
-			break;
-		    case 'n':		/* don't fork */
-			no_fork++;
-			break;
-		    case 'o':		/* One-shot mode. */
-			one_shot = 1;
-			break;
-		    case 'p':
-			break;
-		    case 's':		/* Use syscall interface. */
-			use_syscall = 1;
-			break;
-		    case 'u':		/* Run as this user */
-			server_user = optarg;
-			break;
-		    case 'v':
-			printf("klogd %s.%s\n", VERSION, PATCHLEVEL);
-			exit (1);
-		    case 'x':
-			break;
+		switch ((char) ch) {
+			case '2': /* Print lines with symbols twice. */
+				break;
+			case 'c': /* Set console message level. */
+				log_level = optarg;
+				break;
+			case 'd': /* Activity debug mode. */
+				debugging = 1;
+				break;
+			case 'f': /* Define an output file. */
+				output = optarg;
+				use_output++;
+				break;
+			case 'i': /* Reload module symbols. */
+				SignalDaemon(SIGUSR1);
+				return (0);
+			case 'I':
+				SignalDaemon(SIGUSR2);
+				return (0);
+			case 'j': /* chroot 'j'ail */
+				chroot_dir = optarg;
+				log_flags |= LOG_NDELAY;
+				break;
+			case 'k': /* Kernel symbol file. */
+				break;
+			case 'n': /* don't fork */
+				no_fork++;
+				break;
+			case 'o': /* One-shot mode. */
+				one_shot = 1;
+				break;
+			case 'p':
+				break;
+			case 's': /* Use syscall interface. */
+				use_syscall = 1;
+				break;
+			case 'u': /* Run as this user */
+				server_user = optarg;
+				break;
+			case 'v':
+				printf("klogd %s.%s\n", VERSION, PATCHLEVEL);
+				exit(1);
+			case 'x':
+				break;
 		}
 
 	if (chroot_dir && !server_user) {
@@ -563,14 +535,13 @@ int main(int argc, char *argv[])
 	}
 
 	/* Set console logging level. */
-	if ( log_level != (char *) 0 )
-	{
-		if ( (strlen(log_level) > 1) || \
-		     (strchr("12345678", *log_level) == (char *) 0) )
-		{
+	if (log_level != (char *) 0) {
+		if ((strlen(log_level) > 1) ||
+		    (strchr("12345678", *log_level) == (char *) 0)) {
 			fprintf(stderr, "klogd: Invalid console logging "
-				"level <%s> specified.\n", log_level);
-			return(1);
+			                "level <%s> specified.\n",
+			        log_level);
+			return (1);
 		}
 		console_log_level = *log_level - '0';
 	}
@@ -586,47 +557,39 @@ int main(int argc, char *argv[])
 	 * not disabled with the command line argument and there's no
 	 * such process running.
 	 */
-	if ( (!one_shot) && (!no_fork) )
-	{
-		if (!check_pid(PidFile))
-		{
-			signal (SIGTERM, doexit);
+	if ((!one_shot) && (!no_fork)) {
+		if (!check_pid(PidFile)) {
+			signal(SIGTERM, doexit);
 			pid_t pid;
 			int fl;
 
-			if ( (fl = open(_PATH_DEVNULL, O_RDWR)) < 0 )
-			{
+			if ((fl = open(_PATH_DEVNULL, O_RDWR)) < 0) {
 				fprintf(stderr, "klogd: %s: %s\n",
-				         _PATH_DEVNULL, strerror(errno));
+				        _PATH_DEVNULL, strerror(errno));
 				exit(1);
 			}
 
-			if ( (pid = fork()) == -1 )
-			{
+			if ((pid = fork()) == -1) {
 				fputs("klogd: fork failed.\n", stderr);
 				exit(1);
-			} else if ( pid == 0 )
-			{
+			} else if (pid == 0) {
 				int num_fds = getdtablesize();
 
-				signal (SIGTERM, SIG_DFL);
+				signal(SIGTERM, SIG_DFL);
 
 				/* This is the child closing its file descriptors. */
-				if ( dup2(fl, 0) != 0 ||
-				     ((!use_output || strcmp(output, "-")) &&
-				      dup2(fl, 1) != 1) ||
-				     dup2(fl, 2) != 2)
-				{
+				if (dup2(fl, 0) != 0 ||
+				    ((!use_output || strcmp(output, "-")) &&
+				     dup2(fl, 1) != 1) ||
+				    dup2(fl, 2) != 2) {
 					fputs("klogd: dup2 failed.\n", stderr);
 					exit(1);
 				}
-				for (fl= 3; fl <= num_fds; ++fl)
+				for (fl = 3; fl <= num_fds; ++fl)
 					close(fl);
 
 				setsid();
-			}
-			else
-			{
+			} else {
 				/*
 				 * Parent process
 				 */
@@ -636,29 +599,23 @@ int main(int argc, char *argv[])
 				 */
 				exit(1);
 			}
-		}
-		else
-		{
+		} else {
 			fputs("klogd: Already running.\n", stderr);
 			exit(1);
 		}
 	}
 
-
 	/* tuck my process id away */
-	if (!check_pid(PidFile))
-	{
+	if (!check_pid(PidFile)) {
 		if (!write_pid(PidFile))
 			Terminate();
-	}
-	else
-	{
+	} else {
 		fputs("klogd: Already running.\n", stderr);
 		Terminate();
 	}
 
 	/* Signal setups. */
-	for (ch= 1; ch < NSIG; ++ch)
+	for (ch = 1; ch < NSIG; ++ch)
 		signal(ch, SIG_IGN);
 	signal(SIGINT, stop_daemon);
 	signal(SIGKILL, stop_daemon);
@@ -669,27 +626,22 @@ int main(int argc, char *argv[])
 	signal(SIGUSR1, reload_daemon);
 	signal(SIGUSR2, reload_daemon);
 
-
 	/* Open outputs. */
-	if ( use_output )
-	{
-		if ( strcmp(output, "-") == 0 )
+	if (use_output) {
+		if (strcmp(output, "-") == 0)
 			output_file = stdout;
-		else if ( (output_file = fopen(output, "w")) == (FILE *) 0 )
-		{
-			fprintf(stderr, "klogd: Cannot open output file " \
-				"%s - %s\n", output, strerror(errno));
-			return(1);
+		else if ((output_file = fopen(output, "w")) == (FILE *) 0) {
+			fprintf(stderr, "klogd: Cannot open output file "
+			                "%s - %s\n",
+			        output, strerror(errno));
+			return (1);
 		}
-	}
-	else
+	} else
 		openlog("kernel", log_flags, LOG_KERN);
 
-
 	/* Handle one-shot logging. */
-	if ( one_shot )
-	{
-		if ( (logsrc = GetKernelLogSrc()) == kernel )
+	if (one_shot) {
+		if ((logsrc = GetKernelLogSrc()) == kernel)
 			LogKernelLine();
 		else
 			LogProcLine();
@@ -703,20 +655,18 @@ int main(int argc, char *argv[])
 	logsrc = GetKernelLogSrc();
 
 	if (getpid() != ppid)
-		kill (ppid, SIGTERM);
+		kill(ppid, SIGTERM);
 
 	if (server_user && drop_root()) {
 		syslog(LOG_ALERT, "klogd: failed to drop root");
 		Terminate();
 	}
 
-        /* The main loop. */
-	while (1)
-	{
-		if ( change_state )
+	/* The main loop. */
+	while (1) {
+		if (change_state)
 			ChangeLogging();
-		switch ( logsrc )
-		{
+		switch (logsrc) {
 			case kernel:
 				LogKernelLine();
 				break;

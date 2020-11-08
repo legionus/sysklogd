@@ -23,17 +23,17 @@ typedef union hash_ctx hash_ctx_t;
 
 static inline void hash_init(hash_ctx_t *ctx)
 {
-        platform_SHA256_Init(&ctx->sha256);
+	platform_SHA256_Init(&ctx->sha256);
 }
 
 static inline void hash_update(hash_ctx_t *ctx, const void *data, size_t len)
 {
-        platform_SHA256_Update(&ctx->sha256, data, len);
+	platform_SHA256_Update(&ctx->sha256, data, len);
 }
 
 static inline void hash_final(unsigned char *hash, hash_ctx_t *ctx)
 {
-        platform_SHA256_Final(hash, &ctx->sha256);
+	platform_SHA256_Final(hash, &ctx->sha256);
 }
 
 #else /* USE_CHECKSUMS */
@@ -45,7 +45,6 @@ static inline void hash_final(unsigned char *hash, hash_ctx_t *ctx)
 #define HASH_NAMESZ 0
 
 #define EMPTY_HASH_LITERAL ""
-
 
 static inline void hash_init(hash_ctx_t *ctx)
 {
