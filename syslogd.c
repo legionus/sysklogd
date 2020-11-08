@@ -30,6 +30,7 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <time.h>
+#include <err.h>
 
 #define SYSLOG_NAMES
 #include <sys/syslog.h>
@@ -638,7 +639,7 @@ void add_funix_name(const char *fname)
 	if (nfunix < MAXFUNIX)
 		funixn[nfunix++] = fname;
 	else
-		fprintf(stderr, "Out of descriptors, ignoring %s\n", fname);
+		warnx("out of descriptors, ignoring %s", fname);
 }
 
 void add_funix_dir(const char *dname)
@@ -647,14 +648,12 @@ void add_funix_dir(const char *dname)
 	struct dirent *entry;
 
 	if (chdir(dname)) {
-		fprintf(stderr, "chdir: %s: %m\n", dname);
+		warnx("chdir: %s: %m", dname);
 		return;
 	}
 
-	if (!(dir = opendir("."))) {
-		fprintf(stderr, "opendir: %s: %m\n", dname);
-		exit(1);
-	}
+	if (!(dir = opendir(".")))
+		err(1, "opendir: %s", dname);
 
 	while ((entry = readdir(dir))) {
 		struct stat st;
@@ -674,20 +673,18 @@ void add_funix_dir(const char *dname)
 				continue;
 			buf[n] = '\0';
 
-			if ((name = strdup(buf)) == NULL) {
-				printf("Sorry, can't get enough memory, exiting.\n");
-				exit(1);
-			}
+			if (!(name = strdup(buf)))
+				errx(1, "sorry, can't get enough memory, exiting.");
+
 			add_funix_name(name);
 		}
 	}
 
 	if (closedir(dir))
-		fprintf(stderr, "closedir: %s: %m\n", dname);
-	if (chdir("/") < 0) {
-		fprintf(stderr, "syslogd: chdir to / failed: %m");
-		exit(1);
-	}
+		warn("closedir: %s", dname);
+
+	if (chdir("/") < 0)
+		err(1, "chdir to / failed");
 }
 
 int main(int argc, char **argv)
@@ -724,10 +721,8 @@ int main(int argc, char **argv)
 	int maxfds;
 	const char *funix_dir = "/etc/syslog.d";
 
-	if (chdir("/") < 0) {
-		fprintf(stderr, "syslogd: chdir to / failed: %m");
-		exit(1);
-	}
+	if (chdir("/") < 0)
+		err(1, "chdir to / failed");
 
 	for (i = 1; i < MAXFUNIX; i++) {
 		funixn[i] = "";
@@ -764,8 +759,8 @@ int main(int argc, char **argv)
 				break;
 			case 'i':
 				if (bind_addr) {
-					fprintf(stderr, "Only one -i argument allowed, "
-					                "the first one is taken.\n");
+					warnx("only one -i argument allowed, "
+					      "the first one is taken.");
 					break;
 				}
 				bind_addr = optarg;
@@ -775,8 +770,8 @@ int main(int argc, char **argv)
 				break;
 			case 'l':
 				if (LocalHosts) {
-					fprintf(stderr, "Only one -l argument allowed, "
-					                "the first one is taken.\n");
+					warnx("only one -l argument allowed, "
+					      "the first one is taken.");
 					break;
 				}
 				LocalHosts = crunch_list(optarg);
@@ -798,8 +793,8 @@ int main(int argc, char **argv)
 				break;
 			case 's':
 				if (StripDomains) {
-					fprintf(stderr, "Only one -s argument allowed,"
-					                "the first one is taken.\n");
+					warnx("only one -s argument allowed,"
+					      "the first one is taken.");
 					break;
 				}
 				StripDomains = crunch_list(optarg);
@@ -817,10 +812,9 @@ int main(int argc, char **argv)
 	if ((argc -= optind))
 		usage();
 
-	if (chroot_dir && !server_user) {
-		fputs("'-j' is only valid with '-u'\n", stderr);
-		exit(1);
-	}
+	if (chroot_dir && !server_user)
+		errx(1, "'-j' is only valid with '-u'");
+
 	if (funix_dir && *funix_dir)
 		add_funix_dir(funix_dir);
 
@@ -828,47 +822,42 @@ int main(int argc, char **argv)
 		exit(1);
 
 	if (!(Debug || NoFork)) {
+		pid_t pid;
+
 		verbosef("Checking pidfile.\n");
-		if (!check_pid(PidFile)) {
-			pid_t pid;
 
-			if ((fd = open(_PATH_DEVNULL, O_RDWR)) < 0) {
-				fprintf(stderr, "syslogd: %s: %m\n", _PATH_DEVNULL);
-				exit(1);
-			}
+		if (check_pid(PidFile))
+			errx(1, "already running.");
 
-			signal(SIGTERM, doexit);
-			if ((pid = fork()) == -1) {
-				fputs("syslogd: fork failed.\n", stderr);
-				exit(1);
-			} else if (pid) {
-				/*
-				 * Parent process
-				 */
-				sleep(300);
-				/*
-				 * Not reached unless something major went wrong.  5
-				 * minutes should be a fair amount of time to wait.
-				 * Please note that this procedure is important since
-				 * the father must not exit before syslogd isn't
-				 * initialized or the klogd won't be able to flush its
-				 * logs.  -Joey
-				 */
-				exit(1);
-			}
-			signal(SIGTERM, SIG_DFL);
-			num_fds = getdtablesize();
-			if (dup2(fd, 0) != 0 || dup2(fd, 1) != 1 || dup2(fd, 2) != 2) {
-				fputs("syslogd: dup2 failed.\n", stderr);
-				exit(1);
-			}
-			for (i = 3; i < num_fds; i++)
-				(void) close(i);
-			untty();
-		} else {
-			fputs("syslogd: Already running.\n", stderr);
+		if ((fd = open(_PATH_DEVNULL, O_RDWR)) < 0)
+			err(1, "open: %s", _PATH_DEVNULL);
+
+		signal(SIGTERM, doexit);
+		if ((pid = fork()) == -1) {
+			err(1, "fork failed.");
+		} else if (pid) {
+			/*
+			 * Parent process
+			 */
+			sleep(300);
+			/*
+			 * Not reached unless something major went wrong.  5
+			 * minutes should be a fair amount of time to wait.
+			 * Please note that this procedure is important since
+			 * the father must not exit before syslogd isn't
+			 * initialized or the klogd won't be able to flush its
+			 * logs.  -Joey
+			 */
 			exit(1);
 		}
+		signal(SIGTERM, SIG_DFL);
+		num_fds = getdtablesize();
+		if (dup2(fd, 0) != 0 || dup2(fd, 1) != 1 || dup2(fd, 2) != 2)
+			err(1, "dup2 failed");
+
+		for (i = 3; i < num_fds; i++)
+			(void) close(i);
+		untty();
 	} else
 		debugging_on = 1;
 
@@ -1102,10 +1091,8 @@ char **crunch_list(char *list)
 	for (n = i = 0; p[i]; i++)
 		if (p[i] == LIST_DELIMITER) n++;
 
-	if ((result = (char **) malloc(sizeof(char *) * (n + 2))) == NULL) {
-		printf("Sorry, can't get enough memory, exiting.\n");
-		exit(1);
-	}
+	if (!(result = malloc(sizeof(char *) * (n + 2))))
+		errx(1, "can't get enough memory.");
 
 	/*
 	 * We now can assume that the first and last
@@ -1114,21 +1101,20 @@ char **crunch_list(char *list)
 	 */
 	m = 0;
 	while ((q = strchr(p, LIST_DELIMITER)) && m < n) {
-		result[m] = (char *) malloc((q - p + 1) * sizeof(char));
-		if (result[m] == NULL) {
-			printf("Sorry, can't get enough memory, exiting.\n");
-			exit(1);
-		}
+		result[m] = malloc((q - p + 1) * sizeof(char));
+		if (!result[m])
+			errx(1, "can't get enough memory.");
+
 		memcpy(result[m], p, q - p);
 		result[m][q - p] = '\0';
-		p                = q;
+
+		p = q;
 		p++;
 		m++;
 	}
-	if ((result[m] = strdup(p)) == NULL) {
-		printf("Sorry, can't get enough memory, exiting.\n");
-		exit(1);
-	}
+	if (!(result[m] = strdup(p)))
+		errx(1, "can't get enough memory.");
+
 	result[++m] = NULL;
 
 	return result;

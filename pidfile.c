@@ -26,6 +26,7 @@
 #include <string.h>
 #include <errno.h>
 #include <signal.h>
+#include <err.h>
 
 #include "pidfile.h"
 
@@ -87,7 +88,7 @@ int write_pid (const char *pidfile)
 
   if ( ((fd = open(pidfile, O_RDWR|O_CREAT|O_TRUNC, 0644)) == -1)
        || ((f = fdopen(fd, "r+")) == NULL) ) {
-      fprintf(stderr, "Can't open or create %s.\n", pidfile);
+      warnx("can't open or create %s.", pidfile);
       return 0;
   }
 
@@ -95,20 +96,20 @@ int write_pid (const char *pidfile)
       if (fscanf(f, "%d", &pid) != 1)
         pid = 0;
       fclose(f);
-      printf("Can't lock, lock is held by pid %d.\n", pid);
+      warnx("can't lock, lock is held by pid %d.", pid);
       return 0;
   }
 
   pid = getpid();
   if (!fprintf(f,"%d\n", pid)) {
-      printf("Can't write pid , %s.\n", strerror(errno));
+      warn("can't write pid");
       close(fd);
       return 0;
   }
   fflush(f);
 
   if (flock(fd, LOCK_UN) == -1) {
-      printf("Can't unlock pidfile %s, %s.\n", pidfile, strerror(errno));
+      warn("can't unlock pidfile %s", pidfile);
       close(fd);
       return 0;
   }
@@ -126,4 +127,4 @@ int remove_pid (const char *pidfile)
 {
   return unlink (pidfile);
 }
-  
+
