@@ -84,21 +84,8 @@
 #define _PATH_LOGCONF "/etc/syslog.conf"
 #endif
 
-#if defined(SYSLOGD_PIDNAME)
-#undef _PATH_LOGPID
-#if defined(FSSTND)
-#define _PATH_LOGPID _PATH_VARRUN SYSLOGD_PIDNAME
-#else
-#define _PATH_LOGPID "/etc/" SYSLOGD_PIDNAME
-#endif
-#else
 #ifndef _PATH_LOGPID
-#if defined(FSSTND)
 #define _PATH_LOGPID _PATH_VARRUN "syslogd.pid"
-#else
-#define _PATH_LOGPID "/etc/syslogd.pid"
-#endif
-#endif
 #endif
 
 #ifndef _PATH_DEV

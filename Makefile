@@ -52,10 +52,6 @@ MANDIR = $(prefix)/usr/share/man
 # useful if klogd is started simultaneously or in close-proximity to syslogd.
 # KLOGD_START_DELAY = -DKLOGD_DELAY=5
 
-# The following define determines whether the package adheres to the
-# file system standard.
-FSSTND = -DFSSTND
-
 # The following define determines whether the syslogd should create checksum
 # chains for log entries.
 USE_CHECKSUMS = -DUSE_CHECKSUMS
@@ -67,17 +63,10 @@ MAN_USER = root
 MAN_GROUP = root
 MAN_PERMS = 644
 
-# The following define establishes the name of the pid file for the
-# syslogd daemon.  The library include file (paths.h) defines the
-# name for the syslogd pid to be syslog.pid.  A number of people have
-# suggested that this should be syslogd.pid.  You may cast your
-# ballot below.
-SYSLOGD_PIDNAME = -DSYSLOGD_PIDNAME=\"syslogd.pid\"
-
 SYSLOGD_FLAGS= -DSYSLOG_INET -DSYSLOG_UNIXAF -DINET6 -DNO_SCCS \
-	${USE_CHECKSUMS} ${FSSTND} ${SYSLOGD_PIDNAME}
+	${USE_CHECKSUMS}
 SYSLOG_FLAGS= -DALLOW_KERNEL_LOGGING
-KLOGD_FLAGS = ${FSSTND} ${KLOGD_START_DELAY}
+KLOGD_FLAGS = ${KLOGD_START_DELAY}
 DEB =
 
 TESTS = \

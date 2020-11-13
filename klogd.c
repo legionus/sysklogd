@@ -53,11 +53,7 @@ _syscall3(int, ksyslog, int, type, char *, buf, int, len);
 #define LOG_BUFFER_SIZE 4096
 #define LOG_LINE_LENGTH 1000
 
-#if defined(FSSTND)
 static const char *PidFile = _PATH_VARRUN "klogd.pid";
-#else
-static const char *PidFile = "/etc/klogd.pid";
-#endif
 
 static int kmsg,
     change_state      = 0,
