@@ -41,6 +41,7 @@
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/file.h>
+#include <sys/epoll.h>
 #include <fcntl.h>
 #include <sys/uio.h>
 #include <sys/un.h>
@@ -132,6 +133,7 @@ struct input {
 };
 
 static struct input *inputs = NULL;
+static int epoll_fd = -1;
 
 #ifdef UT_NAMESIZE
 #define UNAMESZ UT_NAMESIZE /* length of a login name */
@@ -231,6 +233,13 @@ static struct filed consfile;
 struct code {
 	const char *c_name;
 	int c_val;
+};
+
+static struct code InputTypeNames[] = {
+	{ "NONE", INPUT_NONE },
+	{ "INET", INPUT_INET },
+	{ "UNIX", INPUT_UNIX },
+	{ NULL, -1 }
 };
 
 static struct code PriNames[] = {
@@ -392,6 +401,7 @@ void doexit(int sig);
 void init(void);
 void cfline(const char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
+const char *print_code_name(int val, struct code *codetab);
 void verbosef(const char *, ...)
     SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 void allocate_log(void);
@@ -684,33 +694,14 @@ void add_funix_dir(const char *dname)
 
 int main(int argc, char **argv)
 {
-	register int i;
 	ssize_t msglen;
 	socklen_t len;
-	int num_fds;
-	/*
-	 * It took me quite some time to figure out how this is
-	 * supposed to work so I guess I should better write it down.
-	 * unixm is a list of file descriptors from which one can
-	 * read().  This is in contrary to readfds which is a list of
-	 * file descriptors where activity is monitored by select()
-	 * and from which one cannot read().  -Joey
-	 *
-	 * Changed: unixm is gone, since we now use datagram unix sockets.
-	 * Hence we recv() from unix sockets directly (rather than
-	 * first accept()ing connections on them), so there's no need
-	 * for separate book-keeping.  --okir
-	 */
-	fd_set readfds;
-
-	int fd;
+	int num_fds, i, fd, ch;
 	pid_t ppid = getpid();
-	int ch;
 
 	char line[MAXLINE + 1];
 	extern int optind;
 	extern char *optarg;
-	int maxfds;
 	const char *funix_dir = "/etc/syslog.d";
 	const char *devlog = _PATH_LOG;
 
@@ -923,54 +914,28 @@ int main(int argc, char **argv)
 	 * Main loop begins here.
 	 */
 	for (;;) {
+		struct epoll_event ev[42];
 		int nfds;
+
 		errno = 0;
-		FD_ZERO(&readfds);
-		maxfds = 0;
-
-		verbosef("Calling select, active file descriptors: ");
-
-		for (struct input *p = inputs; p; p = p->next) {
-			if (p->fd == -1)
+		if ((nfds = epoll_wait(epoll_fd, ev, 42, -1)) < 0) {
+			if (errno == EINTR) {
+				if (restart) {
+					restart = 0;
+					verbosef("Received SIGHUP, reloading syslogd.\n");
+					init();
+				}
 				continue;
-			FD_SET(p->fd, &readfds);
-			if (p->fd > maxfds)
-				maxfds = p->fd;
-			verbosef("%d ", p->fd);
-		}
-		verbosef("\n");
-
-		nfds = select(maxfds + 1, &readfds, NULL, NULL, NULL);
-		if (restart) {
-			restart = 0;
-			verbosef("\nReceived SIGHUP, reloading syslogd.\n");
-			init();
-			continue;
-		}
-		if (nfds == 0) {
-			verbosef("No select activity.\n");
-			continue;
-		}
-		if (nfds < 0) {
-			if (errno != EINTR)
-				logerror("select: %m");
-			verbosef("Select interrupted.\n");
+			}
+			logerror("epoll_wait: %m");
+			break;
+		} else if (nfds == 0) {
+			verbosef("No activity.\n");
 			continue;
 		}
 
-		if (debugging_on) {
-			verbosef("\nSuccessful select, descriptor count = %d, "
-			         "Activity on: ",
-			         nfds);
-			for (nfds = 0; nfds <= maxfds; ++nfds)
-				if (FD_ISSET(nfds, &readfds))
-					verbosef("%d ", nfds);
-			verbosef(("\n"));
-		}
-
-		for (struct input *p = inputs; p; p = p->next) {
-			if (p->fd == -1 || !FD_ISSET(p->fd, &readfds))
-				continue;
+		for (i = 0; i < nfds; i++) {
+			struct input *p = ev[i].data.ptr;
 #ifdef SYSLOG_UNIXAF
 			if (p->type == INPUT_UNIX) {
 				memset(&sinfo, '\0', sizeof(sinfo));
@@ -992,10 +957,9 @@ int main(int argc, char **argv)
 				} else if (msglen < 0 && errno != EINTR) {
 					logerror("recvfrom UNIX socket: %m");
 				}
-				break;
+				continue;
 			}
 #endif
-
 #ifdef SYSLOG_INET
 			if (p->type == INPUT_INET) {
 				struct sockaddr_storage frominet;
@@ -1023,9 +987,14 @@ int main(int argc, char **argv)
 					 * BSDCOMPAT on the socket */
 					sleep(1);
 				}
-				break;
+				continue;
 			}
 #endif
+			logerror("Drop unhandled type of input descriptor #%d (%s)",
+					p->fd, print_code_name(p->type, InputTypeNames));
+			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
+			close(p->fd);
+			p->fd = -1;
 		}
 	}
 }
@@ -2237,14 +2206,24 @@ void init(void)
 	/* close the configuration file */
 	(void) fclose(cf);
 
+	if (epoll_fd < 0 &&
+	    (epoll_fd = epoll_create1(EPOLL_CLOEXEC)) < 0) {
+		logerror("epoll_create1: %m");
+		exit(1);
+	}
+
 #ifdef SYSLOG_UNIXAF
 	for (struct input *p = inputs; p; p = p->next) {
-		if (p->type != INPUT_UNIX || p->fd != -1)
+		if (p->type != INPUT_UNIX)
+			continue;
+		if (p->fd != -1) {
 			/*
 			 * Don't close the socket, preserve it instead
 			 * close(p->fd);
 			 */
+			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
 			continue;
+		}
 		if ((p->fd = create_unix_socket(p->name)) < 0)
 			continue;
 		verbosef("Opened UNIX socket `%s' (fd=%d).\n", p->name, p->fd);
@@ -2261,12 +2240,29 @@ void init(void)
 		for (struct input *p = inputs; p; p = p->next) {
 			if (p->type != INPUT_INET || p->fd == -1)
 				continue;
+			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
 			close(p->fd);
 			p->fd = -1;
 		}
 		InetInuse = 0;
 	}
 #endif
+	for (struct input *p = inputs; p; p = p->next) {
+		if (p->fd == -1)
+			continue;
+
+		struct epoll_event ev = {
+			.events   = EPOLLIN,
+			.data.ptr = p,
+		};
+
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, p->fd, &ev) < 0) {
+			logerror("epoll_ctl: %m");
+			continue;
+		}
+
+		verbosef("Listening active file descriptor #%d\n", p->fd);
+	}
 
 	Initialized = 1;
 
@@ -2571,6 +2567,17 @@ int decode(char *name, struct code *codetab)
 			return (c->c_val);
 		}
 	return (-1);
+}
+
+const char *print_code_name(int val, struct code *codetab)
+{
+	struct code *c = codetab;
+	while (c->c_name) {
+		if (c->c_val == val)
+			return c->c_name;
+		c++;
+	}
+	return "";
 }
 
 void verbosef(const char *fmt, ...)
