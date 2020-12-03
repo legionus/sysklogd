@@ -118,13 +118,20 @@ static int debugging_on = 0;
 static int nlogs        = -1;
 static int restart      = 0;
 
-#define MAXFUNIX 20
-
-static int nfunix                   = 1;
-static const char *funixn[MAXFUNIX] = { _PATH_LOG };
-static int funix[MAXFUNIX]          = {
-        -1,
+enum input_type {
+	INPUT_NONE = 0,
+	INPUT_UNIX,
+	INPUT_INET,
 };
+
+struct input {
+	enum input_type type;
+	const char *name;
+	int fd;
+	struct input *next;
+};
+
+static struct input *inputs = NULL;
 
 #ifdef UT_NAMESIZE
 #define UNAMESZ UT_NAMESIZE /* length of a login name */
@@ -327,7 +334,6 @@ static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
 static const char *emptystring   = "";
 static int InetInuse             = 0;       /* non-zero if INET sockets are being used */
-static int *finet                = NULL;    /* Internet datagram sockets */
 static int Initialized           = 0;       /* set when we have initialized ourselves */
 static int LogFormatInitialized  = 0;       /* set when we have initialized log_format */
 static unsigned int MarkInterval = 20 * 60; /* interval between marks in seconds */
@@ -398,9 +404,8 @@ void sighup_handler(int);
 int set_nonblock_flag(int desc);
 int create_unix_socket(const char *path) SYSKLOGD_NONNULL((1));
 ssize_t recv_withcred(int s, void *buf, size_t len, int flags, pid_t *pid, uid_t *uid, gid_t *gid);
-int *create_inet_sockets(void);
+int create_inet_sockets(void);
 int drop_root(void);
-void add_funix_name(const char *fname) SYSKLOGD_NONNULL((1));
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
 void set_internal_sinfo(struct sourceinfo *source) SYSKLOGD_NONNULL((1));
 
@@ -424,6 +429,36 @@ static size_t safe_strncat(char *d, const char *s, size_t n)
 	if (l == n)
 		return l + strlen(s);
 	return l + safe_strncpy(d + l, s, n - l);
+}
+
+static int set_input(enum input_type type, const char *name, int fd)
+{
+	struct input *ptr = NULL;
+
+	if (name) {
+		for (ptr = inputs; ptr; ptr = ptr->next) {
+			if (ptr->type == type && !strcmp(ptr->name, name))
+				break;
+		}
+	}
+
+	if (!ptr) {
+		ptr = malloc(sizeof(*ptr));
+
+		if (!ptr) {
+			warn("unable to allocate more space");
+			return -1;
+		}
+	}
+
+	ptr->type = type;
+	ptr->name = name;
+	ptr->fd   = fd;
+	ptr->next = inputs;
+
+	inputs = ptr;
+
+	return 0;
 }
 
 #ifdef SYSLOG_UNIXAF
@@ -505,12 +540,11 @@ ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 #endif // SYSLOG_UNIXAF
 
 #ifdef SYSLOG_INET
-int *create_inet_sockets(void)
+int create_inet_sockets(void)
 {
 	struct addrinfo hints, *res, *r;
-	int error, *s, *socks;
+	int error, socks;
 	int on = 1;
-	size_t maxs;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags    = AI_PASSIVE;
@@ -522,36 +556,27 @@ int *create_inet_sockets(void)
 		logerror("network logging disabled (syslog/udp service unknown or address incompatible).");
 		logerror("see syslogd(8) for details of whether and how to enable it.");
 		logerror("%s", gai_strerror(error));
-		return NULL;
+		return -1;
 	}
 
-	/* Count max number of sockets we may open */
-	for (maxs = 0, r = res; r; r = r->ai_next, maxs++)
-		;
-	socks = malloc((maxs + 1) * sizeof(int));
-	if (!socks) {
-		logerror("couldn't allocate memory for sockets");
-		die(0);
-	}
+	socks = 0; /* num of sockets */
 
-	*socks = 0; /* num of sockets counter at start of array */
-	s      = socks + 1;
 	for (r = res; r; r = r->ai_next) {
-		*s = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
-		if (*s < 0) {
+		int s = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
+		if (s < 0) {
 			logerror("socket: %m");
 			continue;
 		}
 		if (r->ai_family == AF_INET6) {
-			if (setsockopt(*s, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) < 0) {
-				logerror("setsockopt (IPV6_ONLY), suspending IPv6: %m");
-				close(*s);
+			if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) < 0) {
+				logerror("setsockopt(IPV6_ONLY), suspending IPv6: %m");
+				close(s);
 				continue;
 			}
 		}
-		if (setsockopt(*s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+		if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
 			logerror("setsockopt(REUSEADDR), suspending inet: %m");
-			close(*s);
+			close(s);
 			continue;
 		}
 		/*
@@ -560,26 +585,24 @@ int *create_inet_sockets(void)
 		 * will stall until the timeout, and other processes trying to
 		 * log will also stall.
 		 */
-		if (set_nonblock_flag(*s) < 0) {
+		if (set_nonblock_flag(s) < 0) {
 			logerror("fcntl(O_NONBLOCK), suspending inet: %m");
-			close(*s);
+			close(s);
 			continue;
 		}
-		if (bind(*s, r->ai_addr, r->ai_addrlen) < 0) {
+		if (bind(s, r->ai_addr, r->ai_addrlen) < 0) {
 			logerror("bind, suspending inet: %m");
-			close(*s);
+			close(s);
 			continue;
 		}
-		(*socks)++;
-		s++;
+
+		set_input(INPUT_INET, NULL, s);
+		socks++;
 	}
 	if (res)
 		freeaddrinfo(res);
-	if (*socks == 0) {
+	if (!socks)
 		logerror("no valid sockets, suspending inet");
-		free(socks);
-		return NULL;
-	}
 	return socks;
 }
 #endif // SYSLOG_INET
@@ -612,20 +635,6 @@ int drop_root(void)
 	if (setuid(pw->pw_uid)) return -1;
 
 	return 0;
-}
-
-void add_funix_name(const char *fname)
-{
-	unsigned i;
-
-	for (i = 0; i < MAXFUNIX; ++i)
-		if (!strcmp(fname, funixn[i]))
-			return;
-
-	if (nfunix < MAXFUNIX)
-		funixn[nfunix++] = fname;
-	else
-		warnx("out of descriptors, ignoring %s", fname);
 }
 
 void add_funix_dir(const char *dname)
@@ -662,7 +671,7 @@ void add_funix_dir(const char *dname)
 			if (!(name = strdup(buf)))
 				errx(1, "sorry, can't get enough memory, exiting.");
 
-			add_funix_name(name);
+			set_input(INPUT_UNIX, name, -1);
 		}
 	}
 
@@ -695,9 +704,6 @@ int main(int argc, char **argv)
 	fd_set readfds;
 
 	int fd;
-#ifdef SYSLOG_INET
-	struct sockaddr_storage frominet;
-#endif
 	pid_t ppid = getpid();
 	int ch;
 
@@ -706,14 +712,10 @@ int main(int argc, char **argv)
 	extern char *optarg;
 	int maxfds;
 	const char *funix_dir = "/etc/syslog.d";
+	const char *devlog = _PATH_LOG;
 
 	if (chdir("/") < 0)
 		err(1, "chdir to / failed");
-
-	for (i = 1; i < MAXFUNIX; i++) {
-		funixn[i] = "";
-		funix[i]  = -1;
-	}
 
 	while ((ch = getopt(argc, argv, "46Aa:cdhf:i:j:l:m:np:P:rs:u:v")) != EOF)
 		switch ((char) ch) {
@@ -729,7 +731,7 @@ int main(int argc, char **argv)
 				send_to_all++;
 				break;
 			case 'a':
-				add_funix_name(optarg);
+				set_input(INPUT_UNIX, optarg, -1);
 				break;
 			case 'c': /* don't compress repeated messages */
 				Compress = 0;
@@ -769,7 +771,7 @@ int main(int argc, char **argv)
 				NoFork = 1;
 				break;
 			case 'p': /* path to regular log socket */
-				funixn[0] = optarg;
+				devlog = optarg;
 				break;
 			case 'P':
 				funix_dir = optarg;
@@ -800,6 +802,8 @@ int main(int argc, char **argv)
 
 	if (chroot_dir && !server_user)
 		errx(1, "'-j' is only valid with '-u'");
+
+	set_input(INPUT_UNIX, devlog, -1);
 
 	if (funix_dir && *funix_dir)
 		add_funix_dir(funix_dir);
@@ -923,43 +927,20 @@ int main(int argc, char **argv)
 		errno = 0;
 		FD_ZERO(&readfds);
 		maxfds = 0;
-#ifdef SYSLOG_UNIXAF
-		/*
-		 * Add the Unix Domain Sockets to the list of read
-		 * descriptors.
-		 */
-		/* Copy master connections */
-		for (i = 0; i < nfunix; i++) {
-			if (funix[i] != -1) {
-				FD_SET(funix[i], &readfds);
-				if (funix[i] > maxfds) maxfds = funix[i];
-			}
-		}
-#endif
-#ifdef SYSLOG_INET
-		/*
-		 * Add the Internet Domain Socket to the list of read
-		 * descriptors.
-		 */
-		if (InetInuse && AcceptRemote) {
-			for (i = 0; i < *finet; i++) {
-				if (finet[i + 1] != -1)
-					FD_SET(finet[i + 1], &readfds);
-				if (finet[i + 1] > maxfds) maxfds = finet[i + 1];
-			}
-			verbosef("Listening on syslog UDP port.\n");
-		}
-#endif
 
-		if (debugging_on) {
-			verbosef("Calling select, active file descriptors (max %d): ", maxfds);
-			for (nfds = 0; nfds <= maxfds; ++nfds)
-				if (FD_ISSET(nfds, &readfds))
-					verbosef("%d ", nfds);
-			verbosef("\n");
+		verbosef("Calling select, active file descriptors: ");
+
+		for (struct input *p = inputs; p; p = p->next) {
+			if (p->fd == -1)
+				continue;
+			FD_SET(p->fd, &readfds);
+			if (p->fd > maxfds)
+				maxfds = p->fd;
+			verbosef("%d ", p->fd);
 		}
-		nfds = select(maxfds + 1, (fd_set *) &readfds, (fd_set *) NULL,
-		              (fd_set *) NULL, (struct timeval *) NULL);
+		verbosef("\n");
+
+		nfds = select(maxfds + 1, &readfds, NULL, NULL, NULL);
 		if (restart) {
 			restart = 0;
 			verbosef("\nReceived SIGHUP, reloading syslogd.\n");
@@ -987,16 +968,18 @@ int main(int argc, char **argv)
 			verbosef(("\n"));
 		}
 
+		for (struct input *p = inputs; p; p = p->next) {
+			if (p->fd == -1 || !FD_ISSET(p->fd, &readfds))
+				continue;
 #ifdef SYSLOG_UNIXAF
-		for (i = 0; i < nfunix; i++) {
-			if ((fd = funix[i]) != -1 && FD_ISSET(fd, &readfds)) {
+			if (p->type == INPUT_UNIX) {
 				memset(&sinfo, '\0', sizeof(sinfo));
 				memset(line, 0, sizeof(line));
 
-				msglen = recv_withcred(fd, line, MAXLINE - 2, 0,
+				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0,
 				                       &sinfo.pid, &sinfo.uid, &sinfo.gid);
 
-				verbosef("Message from UNIX socket: #%d\n", fd);
+				verbosef("Message from UNIX socket: #%d\n", p->fd);
 
 				if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
 					logerror("error - credentials not provided");
@@ -1005,44 +988,45 @@ int main(int argc, char **argv)
 
 				if (msglen > 0) {
 					sinfo.hostname = LocalHostName;
-					printchopped(&sinfo, line, msglen + 2, fd);
+					printchopped(&sinfo, line, msglen + 2, p->fd);
 				} else if (msglen < 0 && errno != EINTR) {
 					logerror("recvfrom UNIX socket: %m");
 				}
+				break;
 			}
-		}
 #endif
 
 #ifdef SYSLOG_INET
-		if (InetInuse && AcceptRemote && finet) {
-			for (i = 0; i < *finet; i++) {
-				if (finet[i + 1] != -1 && FD_ISSET(finet[i + 1], &readfds)) {
-					len = sizeof(frominet);
-					memset(line, 0, sizeof(line));
-					memset(&sinfo, '\0', sizeof(sinfo));
-					msglen = recvfrom(finet[i + 1], line, MAXLINE - 2, 0,
-					                  (struct sockaddr *) &frominet, &len);
-					if (Debug) {
-						const char *addr = cvtaddr(&frominet, len);
-						verbosef("Message from inetd socket: #%d, host: %s\n",
-						         i + 1, addr);
-					}
-					if (msglen > 0) {
-						/* Note that if cvthname() returns NULL then
-						   we shouldn't attempt to log the line -- jch */
-						sinfo.hostname = (char *) cvthname(&frominet, len);
-						printchopped(&sinfo, line,
-						             msglen + 2, finet[i + 1]);
-					} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
-						logerror("recvfrom INET socket: %m");
-						/* should be harmless now that we set
-						 * BSDCOMPAT on the socket */
-						sleep(1);
-					}
+			if (p->type == INPUT_INET) {
+				struct sockaddr_storage frominet;
+
+				len = sizeof(frominet);
+
+				memset(line, 0, sizeof(line));
+				memset(&sinfo, '\0', sizeof(sinfo));
+
+				msglen = recvfrom(p->fd, line, MAXLINE - 2, 0,
+				                  (struct sockaddr *) &frominet, &len);
+				if (Debug) {
+					const char *addr = cvtaddr(&frominet, len);
+					verbosef("Message from inetd socket: host: %s\n", addr);
 				}
+
+				if (msglen > 0) {
+					/* Note that if cvthname() returns NULL then
+					   we shouldn't attempt to log the line -- jch */
+					sinfo.hostname = (char *) cvthname(&frominet, len);
+					printchopped(&sinfo, line, msglen + 2, p->fd);
+				} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
+					logerror("recvfrom INET socket: %m");
+					/* should be harmless now that we set
+					 * BSDCOMPAT on the socket */
+					sleep(1);
+				}
+				break;
 			}
-		}
 #endif
+		}
 	}
 }
 
@@ -1638,10 +1622,11 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 			 */
 		f_forw:
 			verbosef(" %s\n", f->f_un.f_forw.f_hname);
-			if (strcmp(from->hostname, LocalHostName) && NoHops)
+			if (strcmp(from->hostname, LocalHostName) && NoHops) {
 				verbosef("Not sending message to remote.\n");
-			else if (finet) {
-				int i;
+				break;
+			}
+			if (InetInuse) {
 				f->f_time = now;
 				(void) snprintf(line, sizeof(line), "<%u>%s", f->f_prevpri,
 				                (char *) log_fmt.iov[LOG_FORMAT_MSG].iov_base);
@@ -1650,10 +1635,15 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 					l = MAXLINE;
 				err = -1;
 				for (ai = f->f_un.f_forw.f_addr; ai; ai = ai->ai_next) {
-					for (i = 0; i < *finet; i++) {
+					for (struct input *p = inputs; p; p = p->next) {
 						ssize_t lsent;
-						lsent = sendto(finet[i + 1], line, l, 0,
+
+						if (p->fd == -1 || p->type != INPUT_INET)
+							continue;
+
+						lsent = sendto(p->fd, line, l, 0,
 						               ai->ai_addr, ai->ai_addrlen);
+
 						if (lsent == l) {
 							err = -1;
 							break;
@@ -2045,7 +2035,6 @@ void die(int sig)
 	register struct filed *f;
 	char buf[100];
 	int lognum;
-	int i;
 	int was_initialized = Initialized;
 	struct sourceinfo source;
 
@@ -2070,20 +2059,13 @@ void die(int sig)
 	}
 
 	/* Close the UNIX sockets. */
-	for (i = 0; i < nfunix; i++)
-		if (funix[i] != -1)
-			close(funix[i]);
-	/* Close the inet sockets. */
-	if (InetInuse && finet) {
-		for (i = 0; i < *finet; i++)
-			close(finet[i + 1]);
-		free(finet);
+	for (struct input *p = inputs; p; p = p->next) {
+		if (p->fd == -1)
+			continue;
+		if (p->type == INPUT_UNIX)
+			unlink(p->name);
+		close(p->fd);
 	}
-
-	/* Clean-up files. */
-	for (i = 0; i < nfunix; i++)
-		if (funixn[i] && funix[i] != -1)
-			(void) unlink(funixn[i]);
 
 	(void) remove_pid(PidFile);
 
@@ -2256,34 +2238,31 @@ void init(void)
 	(void) fclose(cf);
 
 #ifdef SYSLOG_UNIXAF
-	for (i = 0; i < nfunix; i++) {
-		if (funix[i] != -1)
+	for (struct input *p = inputs; p; p = p->next) {
+		if (p->type != INPUT_UNIX || p->fd != -1)
 			/*
 			 * Don't close the socket, preserve it instead
-			 * close(funix[i]);
+			 * close(p->fd);
 			 */
 			continue;
-		if ((funix[i] = create_unix_socket(funixn[i])) != -1)
-			verbosef("Opened UNIX socket `%s'.\n", funixn[i]);
+		if ((p->fd = create_unix_socket(p->name)) < 0)
+			continue;
+		verbosef("Opened UNIX socket `%s' (fd=%d).\n", p->name, p->fd);
 	}
 #endif
 
 #ifdef SYSLOG_INET
 	if (Forwarding || AcceptRemote) {
-		if (!finet) {
-			finet = create_inet_sockets();
-			if (finet) {
-				InetInuse = 1;
-				verbosef("Opened syslog UDP port.\n");
-			}
+		if (!InetInuse && create_inet_sockets() > 0) {
+			InetInuse = 1;
+			verbosef("Opened syslog UDP port.\n");
 		}
 	} else {
-		if (finet) {
-			for (i = 0; i < *finet; i++)
-				if (finet[i + 1] != -1)
-					close(finet[i + 1]);
-			free(finet);
-			finet = NULL;
+		for (struct input *p = inputs; p; p = p->next) {
+			if (p->type != INPUT_INET || p->fd == -1)
+				continue;
+			close(p->fd);
+			p->fd = -1;
 		}
 		InetInuse = 0;
 	}
