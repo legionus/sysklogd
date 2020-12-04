@@ -19,7 +19,7 @@ prepare()
 
 run_syslogd()
 {
-	"$TOPDIR/syslogd" -n -d \
+	"$TOPDIR/syslogd" -n -ddd \
 		-m 1 \
 		-p "$WORKDIR/log" \
 		-P "$WORKDIR/syslog.d" \

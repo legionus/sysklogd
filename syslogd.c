@@ -115,7 +115,7 @@ static const char ctty[]    = _PATH_CONSOLE;
 
 static char **parts;
 
-static int debugging_on = 0;
+static int verbose      = 0;
 static int nlogs        = -1;
 static int restart      = 0;
 
@@ -337,7 +337,6 @@ struct log_format {
 static struct log_format log_fmt = { 0 };
 static long int iovec_max        = 0;
 
-static int Debug;                              /* debug flag */
 static int Compress = 1;                       /* compress repeated messages flag */
 static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
@@ -727,8 +726,8 @@ int main(int argc, char **argv)
 			case 'c': /* don't compress repeated messages */
 				Compress = 0;
 				break;
-			case 'd': /* debug */
-				Debug = 1;
+			case 'd': /* verbosity */
+				verbose++;
 				break;
 			case 'f': /* configuration file */
 				ConfFile = optarg;
@@ -802,7 +801,7 @@ int main(int argc, char **argv)
 	if (parse_log_format(&log_fmt, "%t %h (uid=%u) %m") < 0)
 		exit(1);
 
-	if (!(Debug || NoFork)) {
+	if (!NoFork) {
 		pid_t pid;
 
 		verbosef("Checking pidfile.\n");
@@ -839,11 +838,7 @@ int main(int argc, char **argv)
 		for (i = 3; i < num_fds; i++)
 			(void) close(i);
 		untty();
-	} else
-		debugging_on = 1;
 
-	/* tuck my process id away */
-	if (!Debug) {
 		verbosef("Writing pidfile.\n");
 		if (!check_pid(PidFile)) {
 			if (!write_pid(PidFile)) {
@@ -858,7 +853,7 @@ int main(int argc, char **argv)
 				kill(ppid, SIGTERM);
 			exit(1);
 		}
-	} /* if ( !Debug ) */
+	}
 
 	consfile.f_type = F_CONSOLE;
 	safe_strncpy(consfile.f_un.f_fname, ctty, sizeof(consfile.f_un.f_fname));
@@ -868,11 +863,11 @@ int main(int argc, char **argv)
 	LocalDomain = emptystring;
 
 	(void) signal(SIGTERM, die);
-	(void) signal(SIGINT, Debug ? die : SIG_IGN);
-	(void) signal(SIGQUIT, Debug ? die : SIG_IGN);
+	(void) signal(SIGINT, NoFork ? die : SIG_IGN);
+	(void) signal(SIGQUIT, NoFork ? die : SIG_IGN);
 	(void) signal(SIGCHLD, reapchild);
 	(void) signal(SIGALRM, domark);
-	(void) signal(SIGUSR1, Debug ? debug_switch : SIG_IGN);
+	(void) signal(SIGUSR1, SIG_IGN);
 	(void) signal(SIGXFSZ, SIG_IGN);
 
 	LastAlarm = MarkInterval;
@@ -895,10 +890,6 @@ int main(int argc, char **argv)
 	verbosef("Starting.\n");
 	init();
 
-	if (Debug) {
-		verbosef("Debugging disabled, SIGUSR1 to turn on debugging.\n");
-		debugging_on = 0;
-	}
 	/*
 	 * Send a signal to the parent to it can terminate.
 	 */
@@ -971,7 +962,7 @@ int main(int argc, char **argv)
 
 				msglen = recvfrom(p->fd, line, MAXLINE - 2, 0,
 				                  (struct sockaddr *) &frominet, &len);
-				if (Debug) {
+				if (verbose) {
 					const char *addr = cvtaddr(&frominet, len);
 					verbosef("Message from inetd socket: host: %s\n", addr);
 				}
@@ -1056,7 +1047,7 @@ char **crunch_list(char *list)
 
 void untty(void)
 {
-	if (!Debug) {
+	if (!NoFork) {
 		setsid();
 	}
 }
@@ -1960,13 +1951,6 @@ void domark(int sig)
 	(void) alarm(LastAlarm);
 }
 
-void debug_switch(int sig)
-{
-	verbosef("Switching debugging_on to %s\n", (debugging_on == 0) ? "true" : "false");
-	debugging_on = (debugging_on == 0) ? 1 : 0;
-	signal(SIGUSR1, debug_switch);
-}
-
 /*
  * Print syslogd errors some place.
  */
@@ -2266,7 +2250,7 @@ void init(void)
 
 	Initialized = 1;
 
-	if (Debug) {
+	if (verbose > 1) {
 		for (lognum = 0; lognum <= nlogs; lognum++) {
 			f = &Files[lognum];
 			if (f->f_type != F_UNUSED) {
@@ -2584,7 +2568,7 @@ void verbosef(const char *fmt, ...)
 {
 	va_list ap;
 
-	if (!(Debug && debugging_on))
+	if (!verbose)
 		return;
 
 	va_start(ap, fmt);
@@ -2592,7 +2576,6 @@ void verbosef(const char *fmt, ...)
 	va_end(ap);
 
 	fflush(stdout);
-	return;
 }
 
 /*
