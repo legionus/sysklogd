@@ -65,9 +65,7 @@
 #include "attribute.h"
 #include "hash.h"
 
-#if defined(__linux__)
 #include <paths.h>
-#endif
 
 #ifndef UTMP_FILE
 #ifdef UTMP_FILENAME
@@ -1624,11 +1622,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 
 		case F_CONSOLE:
 			f->f_time = now;
-#ifdef UNIXPC
-			if (1) {
-#else
 			if (flags & IGN_CONS) {
-#endif
 				verbosef(" (ignored).\n");
 				break;
 			}
@@ -1670,16 +1664,8 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 					break;
 
 				(void) close(f->f_file);
-				/*
-				 * Check for EBADF on TTY's due to vhangup() XXX
-				 * Linux uses EIO instead (mrn 12 May 96)
-				 */
-				if ((f->f_type == F_TTY || f->f_type == F_CONSOLE)
-#ifdef linux
-				    && e == EIO) {
-#else
-				    && e == EBADF) {
-#endif
+
+				if ((f->f_type == F_TTY || f->f_type == F_CONSOLE) && e == EIO) {
 					f->f_file = open(f->f_un.f_fname, O_WRONLY | O_APPEND | O_NOCTTY);
 					if (f->f_file < 0) {
 						f->f_type = F_UNUSED;
