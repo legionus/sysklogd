@@ -1678,9 +1678,7 @@ static void log_users(struct filed *f, struct log_format *fmt)
 void fprintlog(struct filed *f, const struct sourceinfo *const from,
                int flags, const char *msg)
 {
-	char repbuf[80], s_uid[20], s_gid[20], s_pid[20];
-
-	verbosef("Called fprintlog, logging to %s", TypeNames[f->f_type]);
+	char s_uid[20], s_gid[20], s_pid[20];
 
 	clear_record_fields(&log_fmt);
 
@@ -1700,8 +1698,9 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 	if (msg) {
 		set_record_field(&log_fmt, LOG_FORMAT_MSG, msg, -1);
 	} else if (f->f_prevcount > 1) {
-		(void) snprintf(repbuf, sizeof(repbuf), "last message repeated %d times",
-		                f->f_prevcount);
+		char repbuf[80];
+		snprintf(repbuf, sizeof(repbuf), "last message repeated %d times",
+		         f->f_prevcount);
 		set_record_field(&log_fmt, LOG_FORMAT_MSG, repbuf, -1);
 	} else {
 		set_record_field(&log_fmt, LOG_FORMAT_MSG, f->f_prevline, f->f_prevlen);
@@ -1710,32 +1709,26 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 	switch (f->f_type) {
 		case F_UNUSED:
 			f->f_time = now;
-			verbosef("\n");
 			break;
 		case F_FORW_SUSP:
 		case F_FORW_UNKN:
 		case F_FORW:
-			verbosef("\n");
 			log_remote(f, &log_fmt, from);
 			break;
-
 		case F_CONSOLE:
 		case F_TTY:
 		case F_FILE:
 		case F_PIPE:
-			verbosef("\n");
 			log_locally(f, &log_fmt, flags);
 			break;
-
 		case F_USERS:
 		case F_WALL:
-			verbosef("\n");
 			log_users(f, &log_fmt);
 			break;
-	} /* switch */
+	}
+
 	if (f->f_type != F_FORW_UNKN)
 		f->f_prevcount = 0;
-	return;
 }
 
 static jmp_buf ttybuf;
