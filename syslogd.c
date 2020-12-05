@@ -1665,6 +1665,16 @@ again:
 		fsync(f->f_file);
 }
 
+static void log_users(struct filed *f, struct log_format *fmt)
+{
+	verbosef("log to logged in users %s\n", TypeNames[f->f_type]);
+
+	f->f_time = now;
+	set_record_field(fmt, LOG_FORMAT_EOL, "\r\n", 2);
+	calculate_digest(f, fmt);
+	wallmsg(f, fmt);
+}
+
 void fprintlog(struct filed *f, const struct sourceinfo *const from,
                int flags, const char *msg)
 {
@@ -1719,11 +1729,8 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 
 		case F_USERS:
 		case F_WALL:
-			f->f_time = now;
 			verbosef("\n");
-			set_record_field(&log_fmt, LOG_FORMAT_EOL, "\r\n", 2);
-			calculate_digest(f, &log_fmt);
-			wallmsg(f, &log_fmt);
+			log_users(f, &log_fmt);
 			break;
 	} /* switch */
 	if (f->f_type != F_FORW_UNKN)
