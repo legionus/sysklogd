@@ -113,9 +113,9 @@ static const char ctty[]    = _PATH_CONSOLE;
 
 static char **parts;
 
-static int verbose      = 0;
-static int nlogs        = -1;
-static int restart      = 0;
+static int verbose = 0;
+static int nlogs   = -1;
+static int restart = 0;
 
 enum input_type {
 	INPUT_NONE = 0,
@@ -131,7 +131,7 @@ struct input {
 };
 
 static struct input *inputs = NULL;
-static int epoll_fd = -1;
+static int epoll_fd         = -1;
 
 #ifdef UT_NAMESIZE
 #define UNAMESZ UT_NAMESIZE /* length of a login name */
@@ -700,7 +700,7 @@ int main(int argc, char **argv)
 	extern int optind;
 	extern char *optarg;
 	const char *funix_dir = "/etc/syslog.d";
-	const char *devlog = _PATH_LOG;
+	const char *devlog    = _PATH_LOG;
 
 	if (chdir("/") < 0)
 		err(1, "chdir to / failed");
@@ -980,7 +980,7 @@ int main(int argc, char **argv)
 			}
 #endif
 			logerror("Drop unhandled type of input descriptor #%d (%s)",
-					p->fd, print_code_name(p->type, InputTypeNames));
+			         p->fd, print_code_name(p->type, InputTypeNames));
 			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
 			close(p->fd);
 			p->fd = -1;
@@ -1472,20 +1472,132 @@ void calculate_digest(struct filed *f, struct log_format *log_fmt)
 	return;
 }
 
-void fprintlog(struct filed *f, const struct sourceinfo *const from,
-               int flags, const char *msg)
+static void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
 {
-	char repbuf[80];
 #ifdef SYSLOG_INET
-	register size_t l;
+	size_t l;
 	char line[MAXLINE + 1];
 	time_t fwd_suspend;
 	struct addrinfo hints, *ai;
 	int err;
-#endif
-	char s_uid[20], s_gid[20], s_pid[20];
+again:
+	verbosef("log to remote server %s %s\n", TypeNames[f->f_type], f->f_un.f_forw.f_hname);
 
-	verbosef("Called fprintlog, ");
+	if (f->f_type == F_FORW_SUSP) {
+		fwd_suspend = time(NULL) - f->f_time;
+
+		if (fwd_suspend >= INET_SUSPEND_TIME) {
+			verbosef("forwarding suspension over, retrying FORW\n");
+			f->f_type = F_FORW;
+			goto again;
+		}
+
+		verbosef("forwarding suspension not over, time left: %ld.\n",
+		         INET_SUSPEND_TIME - fwd_suspend);
+		return;
+	}
+
+	/*
+	 * The trick is to wait some time, then retry to get the
+	 * address. If that fails retry x times and then give up.
+	 *
+	 * You'll run into this problem mostly if the name server you
+	 * need for resolving the address is on the same machine, but
+	 * is started after syslogd.
+	 */
+	if (f->f_type == F_FORW_UNKN) {
+		fwd_suspend = time(NULL) - f->f_time;
+
+		if (fwd_suspend >= INET_SUSPEND_TIME) {
+			verbosef("forwarding suspension to unknown over, retrying.\n");
+
+			memset(&hints, 0, sizeof(hints));
+			hints.ai_family   = family;
+			hints.ai_socktype = SOCK_DGRAM;
+
+			if ((err = getaddrinfo(f->f_un.f_forw.f_hname, "syslog", &hints, &ai))) {
+				verbosef("failure: %s\n", gai_strerror(err));
+				verbosef("retries: %d\n", f->f_prevcount);
+				if (--f->f_prevcount < 0) {
+					verbosef("giving up.\n");
+					f->f_type = F_UNUSED;
+				} else {
+					verbosef("left retries: %d\n", f->f_prevcount);
+				}
+				return;
+			}
+
+			verbosef("host %s found, resuming.\n", f->f_un.f_forw.f_hname);
+			f->f_un.f_forw.f_addr = ai;
+			f->f_prevcount        = 0;
+			f->f_type             = F_FORW;
+			goto again;
+		}
+
+		verbosef("forwarding suspension not over, time left: %ld\n",
+		         INET_SUSPEND_TIME - fwd_suspend);
+		return;
+	}
+
+	if (f->f_type != F_FORW)
+		return;
+
+	/*
+	 * Don't send any message to a remote host if it
+	 * already comes from one. (we don't care 'bout who
+	 * sent the message, we don't send it anyway)  -Joey
+	 */
+	if (strcmp(from->hostname, LocalHostName) && NoHops) {
+		verbosef("Not sending message to remote.\n");
+		return;
+	}
+
+	if (!InetInuse)
+		return;
+
+	f->f_time = now;
+
+	snprintf(line, sizeof(line), "<%u>%s", f->f_prevpri,
+	         (char *) fmt->iov[LOG_FORMAT_MSG].iov_base);
+
+	if ((l = strlen(line)) > MAXLINE)
+		l = MAXLINE;
+
+	err = -1;
+	for (ai = f->f_un.f_forw.f_addr; ai; ai = ai->ai_next) {
+		for (struct input *p = inputs; p; p = p->next) {
+			ssize_t lsent;
+
+			if (p->fd == -1 || p->type != INPUT_INET)
+				continue;
+
+			lsent = sendto(p->fd, line, l, 0, ai->ai_addr, ai->ai_addrlen);
+
+			if (lsent == l) {
+				err = -1;
+				break;
+			}
+			err = errno;
+		}
+		if (err == -1 && !send_to_all)
+			break;
+	}
+
+	if (err != -1) {
+		f->f_type = F_FORW_SUSP;
+
+		errno = err;
+		logerror("sendto: %m");
+	}
+#endif
+}
+
+void fprintlog(struct filed *f, const struct sourceinfo *const from,
+               int flags, const char *msg)
+{
+	char repbuf[80], s_uid[20], s_gid[20], s_pid[20];
+
+	verbosef("Called fprintlog, logging to %s", TypeNames[f->f_type]);
 
 	clear_record_fields(&log_fmt);
 
@@ -1512,113 +1624,17 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 		set_record_field(&log_fmt, LOG_FORMAT_MSG, f->f_prevline, f->f_prevlen);
 	}
 
-	verbosef("logging to %s", TypeNames[f->f_type]);
-
 	switch (f->f_type) {
 		case F_UNUSED:
 			f->f_time = now;
 			verbosef("\n");
 			break;
-
-#ifdef SYSLOG_INET
 		case F_FORW_SUSP:
-			fwd_suspend = time((time_t *) 0) - f->f_time;
-			if (fwd_suspend >= INET_SUSPEND_TIME) {
-				verbosef("\nForwarding suspension over, "
-				         "retrying FORW ");
-				f->f_type = F_FORW;
-				goto f_forw;
-			} else {
-				verbosef(" %s\n", f->f_un.f_forw.f_hname);
-				verbosef("Forwarding suspension not over, time "
-				         "left: %ld.\n",
-				         (long) (INET_SUSPEND_TIME - fwd_suspend));
-			}
-			break;
-		/*
-		 * The trick is to wait some time, then retry to get the
-		 * address. If that fails retry x times and then give up.
-		 *
-		 * You'll run into this problem mostly if the name server you
-		 * need for resolving the address is on the same machine, but
-		 * is started after syslogd.
-		 */
 		case F_FORW_UNKN:
-			verbosef(" %s\n", f->f_un.f_forw.f_hname);
-			fwd_suspend = time((time_t *) 0) - f->f_time;
-			if (fwd_suspend >= INET_SUSPEND_TIME) {
-				verbosef("Forwarding suspension to unknown over, retrying\n");
-				memset(&hints, 0, sizeof(hints));
-				hints.ai_family   = family;
-				hints.ai_socktype = SOCK_DGRAM;
-				if ((err = getaddrinfo(f->f_un.f_forw.f_hname, "syslog", &hints, &ai))) {
-					verbosef("Failure: %s\n", gai_strerror(err));
-					verbosef("Retries: %d\n", f->f_prevcount);
-					if (--f->f_prevcount < 0) {
-						verbosef("Giving up.\n");
-						f->f_type = F_UNUSED;
-					} else
-						verbosef("Left retries: %d\n", f->f_prevcount);
-				} else {
-					verbosef("%s found, resuming.\n", f->f_un.f_forw.f_hname);
-					f->f_un.f_forw.f_addr = ai;
-					f->f_prevcount        = 0;
-					f->f_type             = F_FORW;
-					goto f_forw;
-				}
-			} else
-				verbosef("Forwarding suspension not over, time "
-				         "left: %ld\n",
-				         (long) (INET_SUSPEND_TIME - fwd_suspend));
-			break;
-
 		case F_FORW:
-			/*
-			 * Don't send any message to a remote host if it
-			 * already comes from one. (we don't care 'bout who
-			 * sent the message, we don't send it anyway)  -Joey
-			 */
-		f_forw:
-			verbosef(" %s\n", f->f_un.f_forw.f_hname);
-			if (strcmp(from->hostname, LocalHostName) && NoHops) {
-				verbosef("Not sending message to remote.\n");
-				break;
-			}
-			if (InetInuse) {
-				f->f_time = now;
-				(void) snprintf(line, sizeof(line), "<%u>%s", f->f_prevpri,
-				                (char *) log_fmt.iov[LOG_FORMAT_MSG].iov_base);
-				l = strlen(line);
-				if (l > MAXLINE)
-					l = MAXLINE;
-				err = -1;
-				for (ai = f->f_un.f_forw.f_addr; ai; ai = ai->ai_next) {
-					for (struct input *p = inputs; p; p = p->next) {
-						ssize_t lsent;
-
-						if (p->fd == -1 || p->type != INPUT_INET)
-							continue;
-
-						lsent = sendto(p->fd, line, l, 0,
-						               ai->ai_addr, ai->ai_addrlen);
-
-						if (lsent == l) {
-							err = -1;
-							break;
-						}
-						err = errno;
-					}
-					if (err == -1 && !send_to_all)
-						break;
-				}
-				if (err != -1) {
-					f->f_type = F_FORW_SUSP;
-					errno     = err;
-					logerror("sendto: %m");
-				}
-			}
+			verbosef("\n");
+			log_remote(f, &log_fmt, from);
 			break;
-#endif
 
 		case F_CONSOLE:
 			f->f_time = now;
