@@ -1592,6 +1592,79 @@ again:
 #endif
 }
 
+static void log_locally(struct filed *f, struct log_format *fmt, int flags)
+{
+	if (f->f_type == F_CONSOLE) {
+		f->f_time = now;
+
+		if (flags & IGN_CONS) {
+			verbosef(" (ignored).\n");
+			return;
+		}
+	}
+
+	f->f_time = now;
+
+	verbosef("log locally %s %s\n", TypeNames[f->f_type], f->f_un.f_fname);
+
+	if (f->f_type == F_TTY || f->f_type == F_CONSOLE) {
+		set_record_field(fmt, LOG_FORMAT_EOL, "\r\n", 2);
+	} else {
+		set_record_field(fmt, LOG_FORMAT_EOL, "\n", 1);
+	}
+again:
+	/*
+	 * f->f_file == -1 is an indicator that we couldn't
+	 * open the file at startup.
+	 */
+	if (f->f_file == -1)
+		return;
+
+	calculate_digest(f, fmt);
+
+	if (writev(f->f_file, fmt->iov, LOG_FORMAT_IOVEC_MAX) < 0) {
+		int e = errno;
+
+		/* If a named pipe is full, just ignore it for now */
+		if ((f->f_type == F_PIPE || f->f_type == F_TTY) && e == EAGAIN)
+			return;
+
+		/*
+		 * If the filesystem is filled up, just ignore
+		 * it for now and continue writing when
+		 * possible
+		 */
+		if (f->f_type == F_FILE && e == ENOSPC)
+			return;
+
+		close(f->f_file);
+
+		if ((f->f_type == F_TTY || f->f_type == F_CONSOLE) && e == EIO) {
+			f->f_file = open(f->f_un.f_fname, O_WRONLY | O_APPEND | O_NOCTTY);
+
+			if (f->f_file >= 0) {
+				if (f->f_type == F_TTY)
+					set_nonblock_flag(f->f_file);
+				untty();
+				goto again;
+			}
+
+			f->f_type = F_UNUSED;
+
+			logerror("open: %s: %m", f->f_un.f_fname);
+		} else {
+			f->f_type = F_UNUSED;
+
+			errno = e;
+			logerror("writev: %s: %m", f->f_un.f_fname);
+		}
+		return;
+	}
+
+	if (f->f_type == F_FILE && (f->f_flags & SYNC_FILE))
+		fsync(f->f_file);
+}
+
 void fprintlog(struct filed *f, const struct sourceinfo *const from,
                int flags, const char *msg)
 {
@@ -1637,68 +1710,11 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 			break;
 
 		case F_CONSOLE:
-			f->f_time = now;
-			if (flags & IGN_CONS) {
-				verbosef(" (ignored).\n");
-				break;
-			}
-			/* FALLTHROUGH */
-
 		case F_TTY:
 		case F_FILE:
 		case F_PIPE:
-			f->f_time = now;
-			verbosef(" %s\n", f->f_un.f_fname);
-			if (f->f_type == F_TTY || f->f_type == F_CONSOLE) {
-				set_record_field(&log_fmt, LOG_FORMAT_EOL, "\r\n", 2);
-			} else {
-				set_record_field(&log_fmt, LOG_FORMAT_EOL, "\n", 1);
-			}
-		again:
-			/*
-			 * f->f_file == -1 is an indicator that we couldn't
-			 * open the file at startup.
-			 */
-			if (f->f_file == -1)
-				break;
-
-			calculate_digest(f, &log_fmt);
-
-			if (writev(f->f_file, log_fmt.iov, LOG_FORMAT_IOVEC_MAX) < 0) {
-				int e = errno;
-
-				/* If a named pipe is full, just ignore it for now */
-				if ((f->f_type == F_PIPE || f->f_type == F_TTY) && e == EAGAIN)
-					break;
-
-				/*
-				 * If the filesystem is filled up, just ignore
-				 * it for now and continue writing when
-				 * possible
-				 */
-				if (f->f_type == F_FILE && e == ENOSPC)
-					break;
-
-				(void) close(f->f_file);
-
-				if ((f->f_type == F_TTY || f->f_type == F_CONSOLE) && e == EIO) {
-					f->f_file = open(f->f_un.f_fname, O_WRONLY | O_APPEND | O_NOCTTY);
-					if (f->f_file < 0) {
-						f->f_type = F_UNUSED;
-						logerror("open: %s: %m", f->f_un.f_fname);
-					} else {
-						untty();
-						goto again;
-					}
-					if (f->f_type == F_TTY)
-						(void) set_nonblock_flag(f->f_file);
-				} else {
-					f->f_type = F_UNUSED;
-					errno     = e;
-					logerror("writev: %s: %m", f->f_un.f_fname);
-				}
-			} else if (f->f_type == F_FILE && (f->f_flags & SYNC_FILE))
-				(void) fsync(f->f_file);
+			verbosef("\n");
+			log_locally(f, &log_fmt, flags);
 			break;
 
 		case F_USERS:
