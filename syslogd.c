@@ -335,7 +335,17 @@ struct log_format {
 static struct log_format log_fmt = { 0 };
 static long int iovec_max        = 0;
 
-static int Compress = 1;                       /* compress repeated messages flag */
+enum option_flag {
+	OPT_SEND_TO_ALL   = (1 << 0), /* send message to all IPv4/IPv6 addresses */
+	OPT_FORK          = (1 << 1), /* don't fork - don't run in daemon mode */
+	OPT_COMPRESS      = (1 << 2), /* compress repeated messages flag */
+	OPT_NET_HOPS      = (1 << 3), /* can we bounce syslog messages through an
+	                               * intermediate host. */
+	OPT_ACCEPT_REMOTE = (1 << 4), /* receive messages that come via UDP */
+};
+
+static unsigned options = 0;
+
 static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
 static const char *emptystring   = "";
@@ -348,16 +358,11 @@ static int family = PF_UNSPEC; /* protocol family (IPv4, IPv6 or both) */
 #else
 static int family = PF_INET; /* protocol family (IPv4 only) */
 #endif
-static int send_to_all        = 0;    /* send message to all IPv4/IPv6 addresses */
 static unsigned int MarkSeq   = 0;    /* mark sequence number */
 static unsigned int LastAlarm = 0;    /* last value passed to alarm() (seconds)  */
 static int DupesPending       = 0;    /* Number of unflushed duplicate messages */
-static int NoFork             = 0;    /* don't fork - don't run in daemon mode */
-static int AcceptRemote       = 0;    /* receive messages that come via UDP */
 static char **StripDomains    = NULL; /* these domains may be stripped before writing logs */
 static char **LocalHosts      = NULL; /* these hosts are logged with their hostname */
-static int NoHops             = 1;    /* Can we bounce syslog messages through an
-					   intermediate host. */
 
 static char *bind_addr   = NULL; /* bind UDP port to this interface only */
 static char *server_user = NULL; /* user name to run server as */
@@ -703,6 +708,8 @@ int main(int argc, char **argv)
 	if (chdir("/") < 0)
 		err(1, "chdir to / failed");
 
+	options |= OPT_COMPRESS | OPT_FORK;
+
 	while ((ch = getopt(argc, argv, "46Aa:cdhf:i:j:l:m:np:P:rs:u:v")) != EOF)
 		switch ((char) ch) {
 			case '4':
@@ -714,13 +721,13 @@ int main(int argc, char **argv)
 				break;
 #endif
 			case 'A':
-				send_to_all++;
+				options |= OPT_SEND_TO_ALL;
 				break;
 			case 'a':
 				set_input(INPUT_UNIX, optarg, -1);
 				break;
 			case 'c': /* don't compress repeated messages */
-				Compress = 0;
+				options &= ~OPT_COMPRESS;
 				break;
 			case 'd': /* verbosity */
 				verbose++;
@@ -729,7 +736,7 @@ int main(int argc, char **argv)
 				ConfFile = optarg;
 				break;
 			case 'h':
-				NoHops = 0;
+				options |= OPT_NET_HOPS;
 				break;
 			case 'i':
 				if (bind_addr) {
@@ -754,7 +761,7 @@ int main(int argc, char **argv)
 				MarkInterval = atoi(optarg) * 60;
 				break;
 			case 'n': /* don't fork */
-				NoFork = 1;
+				options &= ~OPT_FORK;
 				break;
 			case 'p': /* path to regular log socket */
 				devlog = optarg;
@@ -763,7 +770,7 @@ int main(int argc, char **argv)
 				funix_dir = optarg;
 				break;
 			case 'r': /* accept remote messages */
-				AcceptRemote = 1;
+				options |= OPT_ACCEPT_REMOTE;
 				break;
 			case 's':
 				if (StripDomains) {
@@ -797,7 +804,7 @@ int main(int argc, char **argv)
 	if (parse_log_format(&log_fmt, "%t %h (uid=%u) %m") < 0)
 		exit(1);
 
-	if (!NoFork) {
+	if ((options & OPT_FORK)) {
 		pid_t pid;
 
 		if (verbose)
@@ -864,8 +871,8 @@ int main(int argc, char **argv)
 	LocalDomain = emptystring;
 
 	signal(SIGTERM, die);
-	signal(SIGINT, NoFork ? die : SIG_IGN);
-	signal(SIGQUIT, NoFork ? die : SIG_IGN);
+	signal(SIGINT, (options & OPT_FORK) ? SIG_IGN : die);
+	signal(SIGQUIT, (options & OPT_FORK) ? SIG_IGN : die);
 	signal(SIGCHLD, reapchild);
 	signal(SIGALRM, domark);
 	signal(SIGUSR1, SIG_IGN);
@@ -1058,7 +1065,7 @@ char **crunch_list(char *list)
 
 void untty(void)
 {
-	if (!NoFork) {
+	if ((options & OPT_FORK)) {
 		setsid();
 	}
 }
@@ -1359,7 +1366,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		/*
 		 * suppress duplicate lines to this file
 		 */
-		if (Compress && (flags & MARK) == 0 && msglen == f->f_prevlen &&
+		if ((options & OPT_COMPRESS) && (flags & MARK) == 0 && msglen == f->f_prevlen &&
 		    !strcmp(msg, f->f_prevline) &&
 		    !strcmp(from->hostname, f->f_prevhost)) {
 			safe_strncpy(f->f_lasttime, timestamp, sizeof(f->f_lasttime));
@@ -1583,7 +1590,7 @@ again:
 	 * already comes from one. (we don't care 'bout who
 	 * sent the message, we don't send it anyway)  -Joey
 	 */
-	if (strcmp(from->hostname, LocalHostName) && NoHops) {
+	if (strcmp(from->hostname, LocalHostName) && !(options & OPT_NET_HOPS)) {
 		if (verbose)
 			warnx("not sending message to remote.");
 		return;
@@ -1616,7 +1623,7 @@ again:
 			}
 			err = errno;
 		}
-		if (err == -1 && !send_to_all)
+		if (err == -1 && !(options & OPT_SEND_TO_ALL))
 			break;
 	}
 
@@ -2162,7 +2169,7 @@ void init(void)
 	if ((p = strchr(LocalHostName, '.'))) {
 		*p++        = '\0';
 		LocalDomain = p;
-	} else if (AcceptRemote) {
+	} else if ((options & OPT_ACCEPT_REMOTE)) {
 		/*
 		 * It's not clearly defined whether gethostname()
 		 * should return the simple hostname or the fqdn. A
@@ -2283,7 +2290,7 @@ void init(void)
 #endif
 
 #ifdef SYSLOG_INET
-	if (Forwarding || AcceptRemote) {
+	if (Forwarding || (options & OPT_ACCEPT_REMOTE)) {
 		if (!InetInuse && create_inet_sockets() > 0) {
 			InetInuse = 1;
 			if (verbose)
@@ -2358,7 +2365,7 @@ void init(void)
 		}
 	}
 
-	if (AcceptRemote)
+	if ((options & OPT_ACCEPT_REMOTE))
 		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION "." PATCHLEVEL ": restart (remote reception).", &source, ADDDATE);
 	else
 		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION "." PATCHLEVEL ": restart.", &source, ADDDATE);
