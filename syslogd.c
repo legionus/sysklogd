@@ -477,7 +477,7 @@ int create_unix_socket(const char *path)
 	if (path[0] == '\0')
 		return -1;
 
-	(void) unlink(path);
+	unlink(path);
 
 	memset(&sunx, 0, sizeof(sunx));
 	sunx.sun_family = AF_UNIX;
@@ -507,7 +507,7 @@ ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 	memset(&m, 0, sizeof(m));
 	memset(control, 0, sizeof(control));
 
-	iov.iov_base = (char *) buf;
+	iov.iov_base = buf;
 	iov.iov_len  = len;
 
 	m.msg_iov        = &iov;
@@ -833,7 +833,7 @@ int main(int argc, char **argv)
 			err(1, "dup2 failed");
 
 		for (i = 3; i < num_fds; i++)
-			(void) close(i);
+			close(i);
 		untty();
 
 		if (verbose)
@@ -863,13 +863,13 @@ int main(int argc, char **argv)
 	safe_strncpy(LocalHostName, emptystring, sizeof(LocalHostName));
 	LocalDomain = emptystring;
 
-	(void) signal(SIGTERM, die);
-	(void) signal(SIGINT, NoFork ? die : SIG_IGN);
-	(void) signal(SIGQUIT, NoFork ? die : SIG_IGN);
-	(void) signal(SIGCHLD, reapchild);
-	(void) signal(SIGALRM, domark);
-	(void) signal(SIGUSR1, SIG_IGN);
-	(void) signal(SIGXFSZ, SIG_IGN);
+	signal(SIGTERM, die);
+	signal(SIGINT, NoFork ? die : SIG_IGN);
+	signal(SIGQUIT, NoFork ? die : SIG_IGN);
+	signal(SIGCHLD, reapchild);
+	signal(SIGALRM, domark);
+	signal(SIGUSR1, SIG_IGN);
+	signal(SIGXFSZ, SIG_IGN);
 
 	LastAlarm = MarkInterval;
 	alarm(LastAlarm);
@@ -889,7 +889,7 @@ int main(int argc, char **argv)
 		die(0);
 	}
 	for (i = 0; i < num_fds; ++i)
-		parts[i] = (char *) 0;
+		parts[i] = NULL;
 
 	if (verbose)
 		warnx("starting.");
@@ -1078,16 +1078,16 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 	          tmpline[MAXLINE + 1];
 
 	if (verbose)
-		warnx("message length: %lu, File descriptor: %d.", (unsigned long) len, fd);
+		warnx("message length: %lu, File descriptor: %d.", len, fd);
 
 	tmpline[0] = '\0';
-	if (parts[fd] != (char *) 0) {
+	if (parts[fd] != NULL) {
 		if (verbose)
 			warnx("including part from messages.");
 
 		safe_strncpy(tmpline, parts[fd], sizeof(tmpline));
 		free(parts[fd]);
-		parts[fd] = (char *) 0;
+		parts[fd] = NULL;
 		if ((strlen(msg) + strlen(tmpline)) > MAXLINE) {
 			logerror("cannot glue message parts together");
 			printline(source, tmpline);
@@ -1112,7 +1112,7 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 			--p;
 		if (*p == '\0') p++;
 		ptlngth = strlen(p);
-		if ((parts[fd] = malloc(ptlngth + 1)) == (char *) 0)
+		if ((parts[fd] = malloc(ptlngth + 1)) == NULL)
 			logerror("cannot allocate memory for message part.");
 		else {
 			safe_strncpy(parts[fd], p, ptlngth + 1);
@@ -1247,7 +1247,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		msglen -= 16;
 	}
 
-	(void) time(&now);
+	time(&now);
 	timestamp = ctime(&now) + 4;
 
 	/* extract facility and priority level */
@@ -1334,7 +1334,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		if (f->f_file >= 0) {
 			untty();
 			fprintlog(f, from, flags, msg);
-			(void) close(f->f_file);
+			close(f->f_file);
 			f->f_file = -1;
 		}
 		sigprocmask(SIG_UNBLOCK, &mask, NULL);
@@ -1368,7 +1368,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			if (verbose)
 				warnx("msg repeated %d times, %ld sec of %ld.",
 				      f->f_prevcount, now - f->f_time,
-				      (long) repeatinterval[f->f_repeatcount]);
+				      repeatinterval[f->f_repeatcount]);
 
 			if (f->f_prevcount == 1 && DupesPending++ == 0) {
 				unsigned int seconds;
@@ -1391,13 +1391,13 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			 * in the future.
 			 */
 			if (now > REPEATTIME(f)) {
-				fprintlog(f, from, flags, (char *) NULL);
+				fprintlog(f, from, flags, NULL);
 				BACKOFF(f);
 			}
 		} else {
 			/* new line, save it */
 			if (f->f_prevcount) {
-				fprintlog(f, from, 0, (char *) NULL);
+				fprintlog(f, from, 0, NULL);
 
 				if (--DupesPending == 0) {
 					if (verbose)
@@ -1418,7 +1418,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			if (msglen < MAXSVLINE) {
 				f->f_prevlen = msglen;
 				safe_strncpy(f->f_prevline, msg, sizeof(f->f_prevline));
-				fprintlog(f, from, flags, (char *) NULL);
+				fprintlog(f, from, flags, NULL);
 			} else {
 				f->f_prevline[0] = 0;
 				f->f_prevlen     = 0;
@@ -1806,8 +1806,8 @@ void wallmsg(struct filed *f, struct log_format *log_fmt)
 	 * and doing notty().
 	 */
 	if (fork() == 0) {
-		(void) signal(SIGTERM, SIG_DFL);
-		(void) alarm(0);
+		signal(SIGTERM, SIG_DFL);
+		alarm(0);
 
 		if (f->f_type == F_WALL) {
 			snprintf(greetings, sizeof(greetings),
@@ -1835,8 +1835,7 @@ void wallmsg(struct filed *f, struct log_format *log_fmt)
 						i = MAXUNAMES;
 						break;
 					}
-					if (strncmp(f->f_un.f_uname[i],
-					            ut.ut_name, UNAMESZ) == 0)
+					if (!strncmp(f->f_un.f_uname[i], ut.ut_name, UNAMESZ))
 						break;
 				}
 				if (i >= MAXUNAMES)
@@ -1848,8 +1847,8 @@ void wallmsg(struct filed *f, struct log_format *log_fmt)
 			strncat(p, ut.ut_line, UNAMESZ);
 
 			if (setjmp(ttybuf) == 0) {
-				(void) signal(SIGALRM, endtty);
-				(void) alarm(15);
+				signal(SIGALRM, endtty);
+				alarm(15);
 				/* open the terminal */
 				ttyf = open(p, O_WRONLY | O_NOCTTY);
 				if (ttyf >= 0) {
@@ -1863,7 +1862,7 @@ void wallmsg(struct filed *f, struct log_format *log_fmt)
 					ttyf = -1;
 				}
 			}
-			(void) alarm(0);
+			alarm(0);
 		}
 		exit(0);
 	}
@@ -1879,7 +1878,7 @@ void reapchild(int sig)
 
 	while (wait3(&status, WNOHANG, (struct rusage *) NULL) > 0)
 		;
-	(void) signal(SIGCHLD, reapchild); /* reset signal handler -ASP */
+	signal(SIGCHLD, reapchild); /* reset signal handler -ASP */
 	errno = saved_errno;
 }
 
@@ -1999,19 +1998,19 @@ void domark(int sig)
 			if (verbose)
 				warnx("flush %s: repeated %d times, %ld sec.",
 				      TypeNames[f->f_type], f->f_prevcount,
-				      (long) repeatinterval[f->f_repeatcount]);
-			fprintlog(f, &source, 0, (char *) NULL);
+				      repeatinterval[f->f_repeatcount]);
+			fprintlog(f, &source, 0, NULL);
 			BACKOFF(f);
 			DupesPending--;
 		}
 	}
-	(void) signal(SIGALRM, domark);
+	signal(SIGALRM, domark);
 
 	LastAlarm = MarkInterval - MarkSeq;
 	if (DupesPending && LastAlarm > TIMERINTVL)
 		LastAlarm = TIMERINTVL;
 
-	(void) alarm(LastAlarm);
+	alarm(LastAlarm);
 }
 
 /*
@@ -2064,7 +2063,7 @@ void die(int sig)
 		f = &Files[lognum];
 		/* flush any pending output */
 		if (f->f_prevcount)
-			fprintlog(f, &source, 0, (char *) NULL);
+			fprintlog(f, &source, 0, NULL);
 	}
 
 	Initialized = was_initialized;
@@ -2085,7 +2084,7 @@ void die(int sig)
 		close(p->fd);
 	}
 
-	(void) remove_pid(PidFile);
+	remove_pid(PidFile);
 
 	exit(0);
 }
@@ -2130,14 +2129,14 @@ void init(void)
 
 			/* flush any pending output */
 			if (f->f_prevcount)
-				fprintlog(f, &source, 0, (char *) NULL);
+				fprintlog(f, &source, 0, NULL);
 
 			switch (f->f_type) {
 				case F_FILE:
 				case F_PIPE:
 				case F_TTY:
 				case F_CONSOLE:
-					(void) close(f->f_file);
+					close(f->f_file);
 					break;
 				case F_FORW:
 				case F_FORW_SUSP:
@@ -2158,7 +2157,7 @@ void init(void)
 	lognum = 0;
 
 	/* Get hostname */
-	(void) gethostname(LocalHostName, sizeof(LocalHostName));
+	gethostname(LocalHostName, sizeof(LocalHostName));
 	LocalDomain = emptystring;
 	if ((p = strchr(LocalHostName, '.'))) {
 		*p++        = '\0';
@@ -2256,7 +2255,7 @@ void init(void)
 	}
 
 	/* close the configuration file */
-	(void) fclose(cf);
+	fclose(cf);
 
 	if (epoll_fd < 0 &&
 	    (epoll_fd = epoll_create1(EPOLL_CLOEXEC)) < 0) {
@@ -2364,7 +2363,7 @@ void init(void)
 	else
 		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION "." PATCHLEVEL ": restart.", &source, ADDDATE);
 
-	(void) signal(SIGHUP, sighup_handler);
+	signal(SIGHUP, sighup_handler);
 
 	if (verbose)
 		warnx("restarted.");
@@ -2576,7 +2575,7 @@ void cfline(const char *line, struct filed *f)
 				break;
 			}
 			if (isatty(f->f_file)) {
-				(void) set_nonblock_flag(f->f_file);
+				set_nonblock_flag(f->f_file);
 				f->f_type = F_TTY;
 				untty();
 			}
