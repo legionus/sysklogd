@@ -399,8 +399,6 @@ void init(void);
 void cfline(const char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
 const char *print_code_name(int val, struct code *codetab);
-void verbosef(const char *, ...)
-    SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 void allocate_log(void);
 int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t,
                          const char *s, size_t n)
@@ -802,7 +800,8 @@ int main(int argc, char **argv)
 	if (!NoFork) {
 		pid_t pid;
 
-		verbosef("checking pidfile.");
+		if (verbose)
+			warnx("checking pidfile.");
 
 		if (check_pid(PidFile))
 			errx(1, "already running.");
@@ -837,16 +836,20 @@ int main(int argc, char **argv)
 			(void) close(i);
 		untty();
 
-		verbosef("writing pidfile.");
+		if (verbose)
+			warnx("writing pidfile.");
+
 		if (!check_pid(PidFile)) {
 			if (!write_pid(PidFile)) {
-				verbosef("can't write pid.");
+				if (verbose)
+					warnx("can't write pid.");
 				if (getpid() != ppid)
 					kill(ppid, SIGTERM);
 				exit(1);
 			}
 		} else {
-			verbosef("pidfile (and pid) already exist.");
+			if (verbose)
+				warnx("pidfile (and pid) already exist.");
 			if (getpid() != ppid)
 				kill(ppid, SIGTERM);
 			exit(1);
@@ -873,7 +876,10 @@ int main(int argc, char **argv)
 
 	/* Create a partial message table for all file descriptors. */
 	num_fds = getdtablesize();
-	verbosef("allocated parts table for %d file descriptors.", num_fds);
+
+	if (verbose)
+		warnx("allocated parts table for %d file descriptors.", num_fds);
+
 	if (!(parts = malloc(num_fds * sizeof(char *)))) {
 		logerror("cannot allocate memory for message parts table.");
 
@@ -885,7 +891,9 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_fds; ++i)
 		parts[i] = (char *) 0;
 
-	verbosef("starting.");
+	if (verbose)
+		warnx("starting.");
+
 	init();
 
 	/*
@@ -895,7 +903,8 @@ int main(int argc, char **argv)
 		kill(ppid, SIGTERM);
 
 	if (server_user && drop_root()) {
-		verbosef("failed to drop root.");
+		if (verbose)
+			warnx("failed to drop root.");
 		exit(1);
 	}
 
@@ -911,7 +920,8 @@ int main(int argc, char **argv)
 			if (errno == EINTR) {
 				if (restart) {
 					restart = 0;
-					verbosef("received SIGHUP, reloading syslogd.");
+					if (verbose)
+						warnx("received SIGHUP, reloading syslogd.");
 					init();
 				}
 				continue;
@@ -919,7 +929,8 @@ int main(int argc, char **argv)
 			logerror("epoll_wait: %m");
 			break;
 		} else if (nfds == 0) {
-			verbosef("no activity.");
+			if (verbose)
+				warnx("no activity.");
 			continue;
 		}
 
@@ -933,7 +944,8 @@ int main(int argc, char **argv)
 				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0,
 				                       &sinfo.pid, &sinfo.uid, &sinfo.gid);
 
-				verbosef("message from UNIX socket: #%d", p->fd);
+				if (verbose)
+					warnx("message from UNIX socket: #%d", p->fd);
 
 				if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
 					logerror("error - credentials not provided");
@@ -962,7 +974,8 @@ int main(int argc, char **argv)
 				                  (struct sockaddr *) &frominet, &len);
 				if (verbose) {
 					const char *addr = cvtaddr(&frominet, len);
-					verbosef("message from inetd socket: host: %s", addr);
+					if (verbose)
+						warnx("message from inetd socket: host: %s", addr);
 				}
 
 				if (msglen > 0) {
@@ -1064,10 +1077,14 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 	          *end,
 	          tmpline[MAXLINE + 1];
 
-	verbosef("message length: %lu, File descriptor: %d.", (unsigned long) len, fd);
+	if (verbose)
+		warnx("message length: %lu, File descriptor: %d.", (unsigned long) len, fd);
+
 	tmpline[0] = '\0';
 	if (parts[fd] != (char *) 0) {
-		verbosef("including part from messages.");
+		if (verbose)
+			warnx("including part from messages.");
+
 		safe_strncpy(tmpline, parts[fd], sizeof(tmpline));
 		free(parts[fd]);
 		parts[fd] = (char *) 0;
@@ -1076,8 +1093,10 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 			printline(source, tmpline);
 			start = msg;
 		} else {
-			verbosef("previous: %s", tmpline);
-			verbosef("next: %s", msg);
+			if (verbose) {
+				warnx("previous: %s", tmpline);
+				warnx("next: %s", msg);
+			}
 			safe_strncat(tmpline, msg, sizeof(tmpline)); /* length checked above */
 			printline(source, tmpline);
 			if ((strlen(msg) + 1) == len)
@@ -1097,7 +1116,8 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 			logerror("cannot allocate memory for message part.");
 		else {
 			safe_strncpy(parts[fd], p, ptlngth + 1);
-			verbosef("saving partial msg: %s", parts[fd]);
+			if (verbose)
+				warnx("saving partial msg: %s", parts[fd]);
 			memset(p, '\0', ptlngth);
 		}
 	}
@@ -1201,7 +1221,8 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	char newmsg[MAXLINE + 1];
 	sigset_t mask;
 
-	verbosef("logmsg: %s, flags %x, from %s, msg %s", textpri(pri), flags, from->hostname, msg);
+	if (verbose)
+		warnx("logmsg: %s, flags %x, from %s, msg %s", textpri(pri), flags, from->hostname, msg);
 
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGHUP);
@@ -1343,13 +1364,17 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		    !strcmp(from->hostname, f->f_prevhost)) {
 			safe_strncpy(f->f_lasttime, timestamp, sizeof(f->f_lasttime));
 			f->f_prevcount++;
-			verbosef("msg repeated %d times, %ld sec of %ld.",
-			         f->f_prevcount, now - f->f_time,
-			         (long) repeatinterval[f->f_repeatcount]);
+
+			if (verbose)
+				warnx("msg repeated %d times, %ld sec of %ld.",
+				      f->f_prevcount, now - f->f_time,
+				      (long) repeatinterval[f->f_repeatcount]);
 
 			if (f->f_prevcount == 1 && DupesPending++ == 0) {
 				unsigned int seconds;
-				verbosef("setting alarm to flush duplicate messages.");
+
+				if (verbose)
+					warnx("setting alarm to flush duplicate messages.");
 
 				seconds = alarm(0);
 				MarkSeq += LastAlarm - seconds;
@@ -1375,7 +1400,8 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 				fprintlog(f, from, 0, (char *) NULL);
 
 				if (--DupesPending == 0) {
-					verbosef("unsetting duplicate message flush alarm.");
+					if (verbose)
+						warnx("unsetting duplicate message flush alarm.");
 
 					MarkSeq += LastAlarm - alarm(0);
 					LastAlarm = MarkInterval - MarkSeq;
@@ -1481,19 +1507,22 @@ static void log_remote(struct filed *f, struct log_format *fmt, const struct sou
 	struct addrinfo hints, *ai;
 	int err;
 again:
-	verbosef("log to remote server %s %s", TypeNames[f->f_type], f->f_un.f_forw.f_hname);
+	if (verbose)
+		warnx("log to remote server %s %s", TypeNames[f->f_type], f->f_un.f_forw.f_hname);
 
 	if (f->f_type == F_FORW_SUSP) {
 		fwd_suspend = time(NULL) - f->f_time;
 
 		if (fwd_suspend >= INET_SUSPEND_TIME) {
-			verbosef("forwarding suspension over, retrying FORW");
+			if (verbose)
+				warnx("forwarding suspension over, retrying FORW");
 			f->f_type = F_FORW;
 			goto again;
 		}
 
-		verbosef("forwarding suspension not over, time left: %ld.",
-		         INET_SUSPEND_TIME - fwd_suspend);
+		if (verbose)
+			warnx("forwarding suspension not over, time left: %ld.",
+			      INET_SUSPEND_TIME - fwd_suspend);
 		return;
 	}
 
@@ -1509,33 +1538,40 @@ again:
 		fwd_suspend = time(NULL) - f->f_time;
 
 		if (fwd_suspend >= INET_SUSPEND_TIME) {
-			verbosef("forwarding suspension to unknown over, retrying.");
+			if (verbose)
+				warnx("forwarding suspension to unknown over, retrying.");
 
 			memset(&hints, 0, sizeof(hints));
 			hints.ai_family   = family;
 			hints.ai_socktype = SOCK_DGRAM;
 
 			if ((err = getaddrinfo(f->f_un.f_forw.f_hname, "syslog", &hints, &ai))) {
-				verbosef("failure: %s", gai_strerror(err));
-				verbosef("retries: %d", f->f_prevcount);
+				if (verbose) {
+					warnx("failure: %s", gai_strerror(err));
+					warnx("retries: %d", f->f_prevcount);
+				}
 				if (--f->f_prevcount < 0) {
-					verbosef("giving up.");
+					if (verbose)
+						warnx("giving up.");
 					f->f_type = F_UNUSED;
 				} else {
-					verbosef("left retries: %d", f->f_prevcount);
+					if (verbose)
+						warnx("left retries: %d", f->f_prevcount);
 				}
 				return;
 			}
 
-			verbosef("host %s found, resuming.", f->f_un.f_forw.f_hname);
+			if (verbose)
+				warnx("host %s found, resuming.", f->f_un.f_forw.f_hname);
 			f->f_un.f_forw.f_addr = ai;
 			f->f_prevcount        = 0;
 			f->f_type             = F_FORW;
 			goto again;
 		}
 
-		verbosef("forwarding suspension not over, time left: %ld",
-		         INET_SUSPEND_TIME - fwd_suspend);
+		if (verbose)
+			warnx("forwarding suspension not over, time left: %ld",
+			      INET_SUSPEND_TIME - fwd_suspend);
 		return;
 	}
 
@@ -1548,7 +1584,8 @@ again:
 	 * sent the message, we don't send it anyway)  -Joey
 	 */
 	if (strcmp(from->hostname, LocalHostName) && NoHops) {
-		verbosef("not sending message to remote.");
+		if (verbose)
+			warnx("not sending message to remote.");
 		return;
 	}
 
@@ -1598,14 +1635,17 @@ static void log_locally(struct filed *f, struct log_format *fmt, int flags)
 		f->f_time = now;
 
 		if (flags & IGN_CONS) {
-			verbosef("log locally %s %s (ignored)", TypeNames[f->f_type], f->f_un.f_fname);
+			if (verbose)
+				warnx("log locally %s %s (ignored)",
+				      TypeNames[f->f_type], f->f_un.f_fname);
 			return;
 		}
 	}
 
 	f->f_time = now;
 
-	verbosef("log locally %s %s", TypeNames[f->f_type], f->f_un.f_fname);
+	if (verbose)
+		warnx("log locally %s %s", TypeNames[f->f_type], f->f_un.f_fname);
 
 	if (f->f_type == F_TTY || f->f_type == F_CONSOLE) {
 		set_record_field(fmt, LOG_FORMAT_EOL, "\r\n", 2);
@@ -1667,7 +1707,8 @@ again:
 
 static void log_users(struct filed *f, struct log_format *fmt)
 {
-	verbosef("log to logged in users %s", TypeNames[f->f_type]);
+	if (verbose)
+		warnx("log to logged in users %s", TypeNames[f->f_type]);
 
 	f->f_time = now;
 	set_record_field(fmt, LOG_FORMAT_EOL, "\r\n", 2);
@@ -1870,10 +1911,13 @@ const char *cvthname(struct sockaddr_storage *f, unsigned int len)
 
 	if ((error = getnameinfo((struct sockaddr *) f, len,
 	                         hname, NI_MAXHOST, NULL, 0, NI_NAMEREQD))) {
-		verbosef("host name for your address (%s) unknown: %s", hname, gai_strerror(error));
+		if (verbose)
+			warnx("host name for your address (%s) unknown: %s",
+			      hname, gai_strerror(error));
 		if ((error = getnameinfo((struct sockaddr *) f, len,
 		                         hname, NI_MAXHOST, NULL, 0, NI_NUMERICHOST))) {
-			verbosef("malformed from address: %s", gai_strerror(error));
+			if (verbose)
+				warnx("malformed from address: %s", gai_strerror(error));
 			return "???";
 		}
 		return hname;
@@ -1952,9 +1996,10 @@ void domark(int sig)
 		f = &Files[lognum];
 
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
-			verbosef("flush %s: repeated %d times, %ld sec.",
-			         TypeNames[f->f_type], f->f_prevcount,
-			         (long) repeatinterval[f->f_repeatcount]);
+			if (verbose)
+				warnx("flush %s: repeated %d times, %ld sec.",
+				      TypeNames[f->f_type], f->f_prevcount,
+				      (long) repeatinterval[f->f_repeatcount]);
 			fprintlog(f, &source, 0, (char *) NULL);
 			BACKOFF(f);
 			DupesPending--;
@@ -1986,7 +2031,8 @@ void logerror(const char *fmt, ...)
 	vsnprintf(buf + 9, sizeof(buf) - 9, fmt, ap);
 	va_end(ap);
 
-	verbosef("%s", buf + 9);
+	if (verbose)
+		warnx("%s", buf + 9);
 
 	if (!LogFormatInitialized) {
 		fputs(buf, stderr);
@@ -2023,7 +2069,8 @@ void die(int sig)
 
 	Initialized = was_initialized;
 	if (sig) {
-		verbosef("exiting on signal %d", sig);
+		if (verbose)
+			warnx("exiting on signal %d", sig);
 		snprintf(buf, sizeof(buf), "exiting on signal %d", sig);
 		errno = 0;
 		logmsg(LOG_SYSLOG | LOG_INFO, buf, &source, ADDDATE);
@@ -2071,10 +2118,12 @@ void init(void)
 	/*
 	 *  Close all open log files and free log descriptor array.
 	 */
-	verbosef("called init.");
+	if (verbose)
+		warnx("called init.");
 	Initialized = 0;
 	if (nlogs > -1) {
-		verbosef("initializing log structures.");
+		if (verbose)
+			warnx("initializing log structures.");
 
 		for (lognum = 0; lognum <= nlogs; lognum++) {
 			f = &Files[lognum];
@@ -2145,7 +2194,8 @@ void init(void)
 
 	/* open the configuration file */
 	if ((cf = fopen(ConfFile, "r")) == NULL) {
-		verbosef("cannot open %s.", ConfFile);
+		if (verbose)
+			warnx("cannot open %s.", ConfFile);
 		allocate_log();
 		f = &Files[lognum++];
 
@@ -2228,7 +2278,8 @@ void init(void)
 		}
 		if ((p->fd = create_unix_socket(p->name)) < 0)
 			continue;
-		verbosef("opened UNIX socket `%s' (fd=%d).", p->name, p->fd);
+		if (verbose)
+			warnx("opened UNIX socket `%s' (fd=%d).", p->name, p->fd);
 	}
 #endif
 
@@ -2236,7 +2287,8 @@ void init(void)
 	if (Forwarding || AcceptRemote) {
 		if (!InetInuse && create_inet_sockets() > 0) {
 			InetInuse = 1;
-			verbosef("opened syslog UDP port.");
+			if (verbose)
+				warnx("opened syslog UDP port.");
 		}
 	} else {
 		for (struct input *p = inputs; p; p = p->next) {
@@ -2263,7 +2315,8 @@ void init(void)
 			continue;
 		}
 
-		verbosef("listening active file descriptor #%d", p->fd);
+		if (verbose)
+			warnx("listening active file descriptor #%d", p->fd);
 	}
 
 	Initialized = 1;
@@ -2312,7 +2365,9 @@ void init(void)
 		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION "." PATCHLEVEL ": restart.", &source, ADDDATE);
 
 	(void) signal(SIGHUP, sighup_handler);
-	verbosef("restarted.");
+
+	if (verbose)
+		warnx("restarted.");
 }
 
 /*
@@ -2333,7 +2388,8 @@ void cfline(const char *line, struct filed *f)
 #endif
 	char buf[MAXLINE];
 
-	verbosef("cfline(%s)", line);
+	if (verbose)
+		warnx("cfline(%s)", line);
 
 	errno = 0; /* keep strerror() stuff out of logerror messages */
 
@@ -2464,12 +2520,17 @@ void cfline(const char *line, struct filed *f)
 	} else
 		syncfile = 1;
 
-	verbosef("leading char in action: %c", *p);
+	if (verbose)
+		warnx("leading char in action: %c", *p);
+
 	switch (*p) {
 		case '@':
 #ifdef SYSLOG_INET
 			safe_strncpy(f->f_un.f_forw.f_hname, ++p, sizeof(f->f_un.f_forw.f_hname));
-			verbosef("forwarding host: %s", p); /*ASP*/
+
+			if (verbose)
+				warnx("forwarding host: %s", p); /*ASP*/
+
 			memset(&hints, 0, sizeof(hints));
 			hints.ai_family   = family;
 			hints.ai_socktype = SOCK_DGRAM;
@@ -2494,7 +2555,10 @@ void cfline(const char *line, struct filed *f)
 		case '|':
 		case '/':
 			safe_strncpy(f->f_un.f_fname, p, sizeof(f->f_un.f_fname));
-			verbosef("filename: %s", p); /*ASP*/
+
+			if (verbose)
+				warnx("filename: %s", p); /*ASP*/
+
 			if (syncfile)
 				f->f_flags |= SYNC_FILE;
 			if (*p == '|') {
@@ -2521,12 +2585,14 @@ void cfline(const char *line, struct filed *f)
 			break;
 
 		case '*':
-			verbosef("write-all");
+			if (verbose)
+				warnx("write-all");
 			f->f_type = F_WALL;
 			break;
 
 		default:
-			verbosef("users: %s", p); /* ASP */
+			if (verbose)
+				warnx("users: %s", p); /* ASP */
 			for (i = 0; i < MAXUNAMES && *p; i++) {
 				for (q = p; *q && *q != ',';)
 					q++;
@@ -2555,7 +2621,8 @@ int decode(char *name, struct code *codetab)
 	char buf[80];
 
 	if (isdigit(*name)) {
-		verbosef("symbolic name: %s", name);
+		if (verbose)
+			warnx("symbolic name: %s", name);
 		return atoi(name);
 	}
 
@@ -2566,11 +2633,13 @@ int decode(char *name, struct code *codetab)
 
 	for (c = codetab; c->c_name; c++)
 		if (!strcmp(buf, c->c_name)) {
-			verbosef("symbolic name: %s ==> %d", name, c->c_val);
+			if (verbose)
+				warnx("symbolic name: %s ==> %d", name, c->c_val);
 			return c->c_val;
 		}
 
-	verbosef("symbolic name: %s => not found", name);
+	if (verbose)
+		warnx("symbolic name: %s => not found", name);
 	return -1;
 }
 
@@ -2585,27 +2654,14 @@ const char *print_code_name(int val, struct code *codetab)
 	return "";
 }
 
-void verbosef(const char *fmt, ...)
-{
-	va_list ap;
-
-	if (!verbose)
-		return;
-
-	va_start(ap, fmt);
-	vwarnx(fmt, ap);
-	va_end(ap);
-
-	fflush(stderr);
-}
-
 /*
  * The following function is responsible for allocating/reallocating the
  * array which holds the structures which define the logging outputs.
  */
 void allocate_log(void)
 {
-	verbosef("called allocate_log, nlogs = %d.", nlogs);
+	if (verbose)
+		warnx("called allocate_log, nlogs = %d.", nlogs);
 
 	/*
 	 * Decide whether the array needs to be initialized or needs to
