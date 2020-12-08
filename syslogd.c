@@ -1428,58 +1428,58 @@ finish:
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
 }
 
-char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
+char *get_record_field(struct log_format *fmt, enum log_format_type name)
 {
-	if (!(log_fmt->f_mask | (1U << name)))
+	if (!(fmt->f_mask | (1U << name)))
 		return NULL;
 
-	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
-		if (log_fmt->fields[i].f_type == name)
-			return log_fmt->fields[i].f_iov->iov_base;
+	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
+		if (fmt->fields[i].f_type == name)
+			return fmt->fields[i].f_iov->iov_base;
 	}
 	return NULL;
 }
 
-void set_record_field(struct log_format *log_fmt,
+void set_record_field(struct log_format *fmt,
                       enum log_format_type name, const char *value, ssize_t len)
 {
 	size_t iov_len;
 
-	if (!(log_fmt->f_mask | (1U << name)))
+	if (!(fmt->f_mask | (1U << name)))
 		return;
 
 	iov_len = len == -1 ? strlen(value) : len;
 
-	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
-		if (log_fmt->fields[i].f_type == name) {
-			log_fmt->fields[i].f_iov->iov_base = (void *) value;
-			log_fmt->fields[i].f_iov->iov_len  = iov_len;
+	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
+		if (fmt->fields[i].f_type == name) {
+			fmt->fields[i].f_iov->iov_base = (void *) value;
+			fmt->fields[i].f_iov->iov_len  = iov_len;
 		}
 	}
 }
 
-void clear_record_fields(struct log_format *log_fmt)
+void clear_record_fields(struct log_format *fmt)
 {
-	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && log_fmt->fields[i].f_iov; i++) {
-		log_fmt->fields[i].f_iov->iov_base = NULL;
-		log_fmt->fields[i].f_iov->iov_len  = 0;
+	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
+		fmt->fields[i].f_iov->iov_base = NULL;
+		fmt->fields[i].f_iov->iov_len  = 0;
 	}
 }
 
-void calculate_digest(struct filed *f, struct log_format *log_fmt)
+void calculate_digest(struct filed *f, struct log_format *fmt)
 {
 	int i, n;
 	unsigned char digest[HASH_RAWSZ];
 	hash_ctx_t hash_ctx;
 
-	if (!(log_fmt->f_mask | (1 << LOG_FORMAT_HASH)))
+	if (!(fmt->f_mask | (1 << LOG_FORMAT_HASH)))
 		return;
 
 	digest[0] = 0;
 
 	hash_init(&hash_ctx);
 	for (i = 0; i < LOG_FORMAT_IOVEC_MAX; i++)
-		hash_update(&hash_ctx, log_fmt->iov[i].iov_base, log_fmt->iov[i].iov_len);
+		hash_update(&hash_ctx, fmt->iov[i].iov_base, fmt->iov[i].iov_len);
 	hash_final(digest, &hash_ctx);
 
 	safe_strncpy(f->f_prevhash, HASH_NAME, sizeof(f->f_prevhash));
@@ -1783,7 +1783,7 @@ void endtty(int sig)
  *	Write the specified message to either the entire
  *	world, or a list of approved users.
  */
-void wallmsg(struct filed *f, struct log_format *log_fmt)
+void wallmsg(struct filed *f, struct log_format *fmt)
 {
 	char p[sizeof(_PATH_DEV) + UNAMESZ];
 	register int i;
@@ -1810,9 +1810,9 @@ void wallmsg(struct filed *f, struct log_format *log_fmt)
 		if (f->f_type == F_WALL) {
 			snprintf(greetings, sizeof(greetings),
 			         "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
-			         get_record_field(log_fmt, LOG_FORMAT_HOST), ctime(&now));
+			         get_record_field(fmt, LOG_FORMAT_HOST), ctime(&now));
 
-			set_record_field(log_fmt, LOG_FORMAT_BOL, greetings, -1);
+			set_record_field(fmt, LOG_FORMAT_BOL, greetings, -1);
 		}
 
 		/* scan the user login file */
@@ -1853,7 +1853,7 @@ void wallmsg(struct filed *f, struct log_format *log_fmt)
 					struct stat statb;
 
 					if (!fstat(ttyf, &statb) && (statb.st_mode & S_IWRITE)) {
-						if (writev(ttyf, log_fmt->iov, LOG_FORMAT_IOVEC_MAX) < 0)
+						if (writev(ttyf, fmt->iov, LOG_FORMAT_IOVEC_MAX) < 0)
 							errno = 0; /* ignore */
 					}
 					close(ttyf);
@@ -2243,21 +2243,21 @@ void init(void)
 	}
 
 #ifdef SYSLOG_UNIXAF
-	for (struct input *p = inputs; p; p = p->next) {
-		if (p->type != INPUT_UNIX)
+	for (struct input *in = inputs; in; in = in->next) {
+		if (in->type != INPUT_UNIX)
 			continue;
-		if (p->fd != -1) {
+		if (in->fd != -1) {
 			/*
 			 * Don't close the socket, preserve it instead
 			 * close(p->fd);
 			 */
-			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
+			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, in->fd, NULL);
 			continue;
 		}
-		if ((p->fd = create_unix_socket(p->name)) < 0)
+		if ((in->fd = create_unix_socket(in->name)) < 0)
 			continue;
 		if (verbose)
-			warnx("opened UNIX socket `%s' (fd=%d).", p->name, p->fd);
+			warnx("opened UNIX socket `%s' (fd=%d).", in->name, in->fd);
 	}
 #endif
 
@@ -2269,32 +2269,32 @@ void init(void)
 				warnx("opened syslog UDP port.");
 		}
 	} else {
-		for (struct input *p = inputs; p; p = p->next) {
-			if (p->type != INPUT_INET || p->fd == -1)
+		for (struct input *in = inputs; in; in = in->next) {
+			if (in->type != INPUT_INET || in->fd == -1)
 				continue;
-			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
-			close(p->fd);
-			p->fd = -1;
+			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, in->fd, NULL);
+			close(in->fd);
+			in->fd = -1;
 		}
 		InetInuse = 0;
 	}
 #endif
-	for (struct input *p = inputs; p; p = p->next) {
-		if (p->fd == -1)
+	for (struct input *in = inputs; in; in = in->next) {
+		if (in->fd == -1)
 			continue;
 
 		struct epoll_event ev = {
 			.events   = EPOLLIN,
-			.data.ptr = p,
+			.data.ptr = in,
 		};
 
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, p->fd, &ev) < 0) {
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, in->fd, &ev) < 0) {
 			logerror("epoll_ctl: %m");
 			continue;
 		}
 
 		if (verbose)
-			warnx("listening active file descriptor #%d", p->fd);
+			warnx("listening active file descriptor #%d", in->fd);
 	}
 
 	Initialized = 1;
@@ -2672,7 +2672,7 @@ void allocate_log(void)
 	return;
 }
 
-int set_log_format_field(struct log_format *log_fmt, size_t i,
+int set_log_format_field(struct log_format *fmt, size_t i,
                          enum log_format_type t, const char *s, size_t n)
 {
 	if (i >= iovec_max) {
@@ -2681,25 +2681,25 @@ int set_log_format_field(struct log_format *log_fmt, size_t i,
 	}
 
 	if (t != LOG_FORMAT_NONE) {
-		if (log_fmt->fields_nr >= LOG_FORMAT_FIELDS_MAX) {
+		if (fmt->fields_nr >= LOG_FORMAT_FIELDS_MAX) {
 			logerror("Too many placeholders in the log_format string");
 			return -1;
 		}
 
-		log_fmt->f_mask |= (1U << t);
-		log_fmt->fields[log_fmt->fields_nr].f_type = t;
-		log_fmt->fields[log_fmt->fields_nr].f_iov  = log_fmt->iov + i;
-		log_fmt->fields_nr++;
+		fmt->f_mask |= (1U << t);
+		fmt->fields[fmt->fields_nr].f_type = t;
+		fmt->fields[fmt->fields_nr].f_iov  = fmt->iov + i;
+		fmt->fields_nr++;
 	}
 
-	log_fmt->iov[i].iov_base = (void *) s;
-	log_fmt->iov[i].iov_len  = n;
-	log_fmt->iovec_nr++;
+	fmt->iov[i].iov_base = (void *) s;
+	fmt->iov[i].iov_len  = n;
+	fmt->iovec_nr++;
 
 	return 0;
 }
 
-int parse_log_format(struct log_format *log_fmt, const char *str)
+int parse_log_format(struct log_format *fmt, const char *str)
 {
 	const char *ptr, *start;
 	int i, special;
@@ -2843,9 +2843,9 @@ int parse_log_format(struct log_format *log_fmt, const char *str)
 	                         LOG_FORMAT_EOL, NULL, 0) < 0)
 		goto error;
 
-	log_fmt->line   = new_fmt.line;
-	log_fmt->iov    = new_fmt.iov;
-	log_fmt->fields = new_fmt.fields;
+	fmt->line   = new_fmt.line;
+	fmt->iov    = new_fmt.iov;
+	fmt->fields = new_fmt.fields;
 
 	LogFormatInitialized = 1;
 
