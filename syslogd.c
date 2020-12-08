@@ -358,11 +358,12 @@ static int family = PF_UNSPEC; /* protocol family (IPv4, IPv6 or both) */
 #else
 static int family = PF_INET; /* protocol family (IPv4 only) */
 #endif
-static unsigned int MarkSeq   = 0;    /* mark sequence number */
-static unsigned int LastAlarm = 0;    /* last value passed to alarm() (seconds)  */
-static int DupesPending       = 0;    /* Number of unflushed duplicate messages */
-static char **StripDomains    = NULL; /* these domains may be stripped before writing logs */
-static char **LocalHosts      = NULL; /* these hosts are logged with their hostname */
+static time_t now           = 0;
+static time_t LastFlushDups = 0;
+static time_t LastFlushMark = 0;
+static int DupesPending     = 0;    /* Number of unflushed duplicate messages */
+static char **StripDomains  = NULL; /* these domains may be stripped before writing logs */
+static char **LocalHosts    = NULL; /* these hosts are logged with their hostname */
 
 static char *bind_addr   = NULL; /* bind UDP port to this interface only */
 static char *server_user = NULL; /* user name to run server as */
@@ -394,7 +395,7 @@ void wallmsg(register struct filed *f, struct log_format *log_fmt);
 void reapchild(int);
 const char *cvtaddr(struct sockaddr_storage *f, unsigned int len);
 const char *cvthname(struct sockaddr_storage *f, unsigned int len);
-void domark(int);
+void flush_dups(void);
 void debug_switch(int);
 void logerror(const char *fmt, ...)
     SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
@@ -874,12 +875,9 @@ int main(int argc, char **argv)
 	signal(SIGINT, (options & OPT_FORK) ? SIG_IGN : die);
 	signal(SIGQUIT, (options & OPT_FORK) ? SIG_IGN : die);
 	signal(SIGCHLD, reapchild);
-	signal(SIGALRM, domark);
+	signal(SIGALRM, SIG_IGN);
 	signal(SIGUSR1, SIG_IGN);
 	signal(SIGXFSZ, SIG_IGN);
-
-	LastAlarm = MarkInterval;
-	alarm(LastAlarm);
 
 	/* Create a partial message table for all file descriptors. */
 	num_fds = getdtablesize();
@@ -923,21 +921,35 @@ int main(int argc, char **argv)
 		int nfds;
 
 		errno = 0;
-		if ((nfds = epoll_wait(epoll_fd, ev, 42, -1)) < 0) {
-			if (errno == EINTR) {
-				if (restart) {
-					restart = 0;
-					if (verbose)
-						warnx("received SIGHUP, reloading syslogd.");
-					init();
-				}
-				continue;
-			}
+		nfds  = epoll_wait(epoll_fd, ev, 42, 1000);
+
+		if (nfds < 0 && errno != EINTR) {
 			logerror("epoll_wait: %m");
 			break;
-		} else if (nfds == 0) {
+		}
+
+		now = time(NULL);
+
+		if (DupesPending > 0 &&
+		    (now - LastFlushDups) >= TIMERINTVL) {
+			LastFlushDups = now;
 			if (verbose)
-				warnx("no activity.");
+				warnx("flush duplicate messages.");
+			flush_dups();
+		}
+
+		if (MarkInterval > 0 &&
+		    (now - LastFlushMark) >= MarkInterval) {
+			LastFlushMark = now;
+			set_internal_sinfo(&sinfo);
+			logmsg(LOG_MARK | LOG_INFO, "-- MARK --", &sinfo, ADDDATE | MARK);
+		}
+
+		if (restart) {
+			restart = 0;
+			if (verbose)
+				warnx("received SIGHUP, reloading syslogd.");
+			init();
 			continue;
 		}
 
@@ -1212,8 +1224,6 @@ char *textpri(unsigned int pri)
 	return res;
 }
 
-static time_t now;
-
 /*
  * Log a message to the appropriate log files, users, etc. based on
  * the priority.
@@ -1377,22 +1387,11 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 				      f->f_prevcount, now - f->f_time,
 				      repeatinterval[f->f_repeatcount]);
 
-			if (f->f_prevcount == 1 && DupesPending++ == 0) {
-				unsigned int seconds;
-
-				if (verbose)
-					warnx("setting alarm to flush duplicate messages.");
-
-				seconds = alarm(0);
-				MarkSeq += LastAlarm - seconds;
-				LastAlarm = seconds;
-				if (LastAlarm > TIMERINTVL)
-					LastAlarm = TIMERINTVL;
-				alarm(LastAlarm);
-			}
+			if (f->f_prevcount == 1)
+				DupesPending++;
 
 			/*
-			 * If domark would have logged this by now,
+			 * If flush_dups would have logged this by now,
 			 * flush it now (so we don't hold isolated messages),
 			 * but back off so we'll flush less often
 			 * in the future.
@@ -1405,15 +1404,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			/* new line, save it */
 			if (f->f_prevcount) {
 				fprintlog(f, from, 0, NULL);
-
-				if (--DupesPending == 0) {
-					if (verbose)
-						warnx("unsetting duplicate message flush alarm.");
-
-					MarkSeq += LastAlarm - alarm(0);
-					LastAlarm = MarkInterval - MarkSeq;
-					alarm(LastAlarm);
-				}
+				DupesPending--;
 			}
 
 			f->f_prevpri     = pri;
@@ -1981,25 +1972,13 @@ void set_internal_sinfo(struct sourceinfo *source)
 	source->pid      = getpid();
 }
 
-void domark(int sig)
+void flush_dups(void)
 {
-	register struct filed *f;
-	int lognum;
 	struct sourceinfo source;
-
 	set_internal_sinfo(&source);
 
-	if (MarkInterval > 0) {
-		now = time(NULL);
-		MarkSeq += LastAlarm;
-		if (MarkSeq >= MarkInterval) {
-			logmsg(LOG_MARK | LOG_INFO, "-- MARK --", &source, ADDDATE | MARK);
-			MarkSeq -= MarkInterval;
-		}
-	}
-
-	for (lognum = 0; lognum <= nlogs; lognum++) {
-		f = &Files[lognum];
+	for (int lognum = 0; lognum <= nlogs; lognum++) {
+		struct filed *f = &Files[lognum];
 
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
 			if (verbose)
@@ -2011,13 +1990,6 @@ void domark(int sig)
 			DupesPending--;
 		}
 	}
-	signal(SIGALRM, domark);
-
-	LastAlarm = MarkInterval - MarkSeq;
-	if (DupesPending && LastAlarm > TIMERINTVL)
-		LastAlarm = TIMERINTVL;
-
-	alarm(LastAlarm);
 }
 
 /*
