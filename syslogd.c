@@ -114,7 +114,6 @@ static const char ctty[]    = _PATH_CONSOLE;
 static char **parts;
 
 static int verbose = 0;
-static int nlogs   = -1;
 static int restart = 0;
 
 enum input_type {
@@ -186,6 +185,7 @@ struct filed {
 	int f_flags;                         /* store some additional flags */
 	/* hash of last logged message */
 	char f_prevhash[HASH_NAMESZ + 1 + HASH_HEXSZ + 1];
+	struct filed *next;
 };
 
 /*
@@ -225,7 +225,7 @@ static const char *TypeNames[] = {
 	"FORW(UNKNOWN)", "PIPE"
 };
 
-static struct filed *Files = (struct filed *) 0;
+static struct filed *files = NULL;
 static struct filed consfile;
 
 struct code {
@@ -405,7 +405,7 @@ void init(void);
 void cfline(const char *line, register struct filed *f);
 int decode(char *name, struct code *codetab);
 const char *print_code_name(int val, struct code *codetab);
-void allocate_log(void);
+struct filed *allocate_log(void);
 int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t,
                          const char *s, size_t n)
     SYSKLOGD_NONNULL((1));
@@ -1231,8 +1231,8 @@ char *textpri(unsigned int pri)
 
 void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const from, int flags)
 {
-	register struct filed *f;
-	int fac, prilev, lognum;
+	struct filed *f;
+	int fac, prilev;
 	size_t msglen;
 	char *timestamp;
 	char newmsg[MAXLINE + 1];
@@ -1358,9 +1358,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		return;
 	}
 
-	for (lognum = 0; lognum <= nlogs; lognum++) {
-		f = &Files[lognum];
-
+	for (f = files; f; f = f->next) {
 		/* skip messages that are incorrect priority */
 		if ((f->f_pmask[fac] == TABLE_NOPRI) ||
 		    ((f->f_pmask[fac] & (1 << prilev)) == 0))
@@ -1977,9 +1975,7 @@ void flush_dups(void)
 	struct sourceinfo source;
 	set_internal_sinfo(&source);
 
-	for (int lognum = 0; lognum <= nlogs; lognum++) {
-		struct filed *f = &Files[lognum];
-
+	for (struct filed *f = files; f; f = f->next) {
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
 			if (verbose)
 				warnx("flush %s: repeated %d times, %ld sec.",
@@ -2027,9 +2023,8 @@ void logerror(const char *fmt, ...)
 
 void die(int sig)
 {
-	register struct filed *f;
+	struct filed *f;
 	char buf[100];
-	int lognum;
 	int was_initialized = Initialized;
 	struct sourceinfo source;
 
@@ -2038,8 +2033,7 @@ void die(int sig)
 	Initialized = 0; /* Don't log SIGCHLDs in case we
 			   receive one during exiting */
 
-	for (lognum = 0; lognum <= nlogs; lognum++) {
-		f = &Files[lognum];
+	for (f = files; f; f = f->next) {
 		/* flush any pending output */
 		if (f->f_prevcount)
 			fprintlog(f, &source, 0, NULL);
@@ -2099,13 +2093,14 @@ void init(void)
 	if (verbose)
 		warnx("called init.");
 	Initialized = 0;
-	if (nlogs > -1) {
+	if (files) {
+		struct filed *n;
+
 		if (verbose)
 			warnx("initializing log structures.");
 
-		for (lognum = 0; lognum <= nlogs; lognum++) {
-			f = &Files[lognum];
-
+		f = files;
+		while (f) {
 			/* flush any pending output */
 			if (f->f_prevcount)
 				fprintlog(f, &source, 0, NULL);
@@ -2122,18 +2117,18 @@ void init(void)
 					freeaddrinfo(f->f_un.f_forw.f_addr);
 					break;
 			}
+
+			n = f->next;
+			free(f);
+			f = n;
 		}
 
 		/*
 		 * This is needed especially when HUPing syslogd as the
 		 * structure would grow infinitively.  -Joey
 		 */
-		nlogs = -1;
-		free((void *) Files);
-		Files = (struct filed *) 0;
+		files = NULL;
 	}
-
-	lognum = 0;
 
 	/* Get hostname */
 	gethostname(LocalHostName, sizeof(LocalHostName));
@@ -2174,8 +2169,7 @@ void init(void)
 	if ((cf = fopen(ConfFile, "r")) == NULL) {
 		if (verbose)
 			warnx("cannot open %s.", ConfFile);
-		allocate_log();
-		f = &Files[lognum++];
+		f = allocate_log();
 
 		cfline("*.err\t" _PATH_CONSOLE, f);
 
@@ -2223,8 +2217,7 @@ void init(void)
 			continue;
 		}
 
-		allocate_log();
-		f = &Files[lognum++];
+		f = allocate_log();
 
 		cfline(cbuf, f);
 
@@ -2300,8 +2293,7 @@ void init(void)
 	Initialized = 1;
 
 	if (verbose > 1) {
-		for (lognum = 0; lognum <= nlogs; lognum++) {
-			f = &Files[lognum];
+		for (f = files; f; f = f->next) {
 			if (f->f_type != F_UNUSED) {
 				printf("%2d: ", lognum);
 
@@ -2636,40 +2628,25 @@ const char *print_code_name(int val, struct code *codetab)
  * The following function is responsible for allocating/reallocating the
  * array which holds the structures which define the logging outputs.
  */
-void allocate_log(void)
+struct filed *allocate_log(void)
 {
-	if (verbose)
-		warnx("called allocate_log, nlogs = %d.", nlogs);
+	struct filed *new;
 
-	/*
-	 * Decide whether the array needs to be initialized or needs to
-	 * grow.
-	 */
-	if (nlogs == -1) {
-		Files = malloc(sizeof(struct filed));
-		if (!Files) {
-			logerror("cannot initialize log structure.");
-			return;
-		}
-	} else {
-		struct filed *newFiles;
-		/* Re-allocate the array. */
-		newFiles = realloc(Files, (nlogs + 2) * sizeof(struct filed));
-		if (!newFiles) {
-			logerror("cannot grow log structure.");
-			return;
-		}
-		Files = newFiles;
+	if (verbose)
+		warnx("allocating new log structure.");
+
+	new = calloc(1, sizeof(*new));
+	if (!new) {
+		logerror("cannot initialize log structure.");
+		return NULL;
 	}
 
-	/*
-	 * Initialize the array element, bump the number of elements in the
-	 * the array and return.
-	 */
-	++nlogs;
-	memset(&Files[nlogs], '\0', sizeof(struct filed));
-	safe_strncpy(Files[nlogs].f_prevhash, EMPTY_HASH_LITERAL, sizeof(Files[nlogs].f_prevhash));
-	return;
+	safe_strncpy(new->f_prevhash, EMPTY_HASH_LITERAL, sizeof(new->f_prevhash));
+
+	new->next = files;
+	files     = new;
+
+	return files;
 }
 
 int set_log_format_field(struct log_format *fmt, size_t i,
