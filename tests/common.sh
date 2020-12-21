@@ -7,37 +7,68 @@ uucp local0 local1 local2 local3 local4 local5 local6 local7'
 
 prepare()
 {
-	rm -rf -- "$WORKDIR/output"
-
+	local suffix=''
+	[ "$#" -eq 1 ] || suffix="$2"
+	rm -rf -- "$1/output${suffix}"
 	mkdir -p -- \
-		"$WORKDIR/expect" \
-		"$WORKDIR/output" \
-		"$WORKDIR/syslog.d"
-
-	:>"$WORKDIR/syslog-mark.log"
+		"$1/output${suffix}" \
+		"$1/syslog${suffix}.d"
+	:>"$1/syslog-mark${suffix}.log"
 }
 
 run_syslogd()
 {
-	"$TOPDIR/syslogd" -n -ddd \
+	local suffix=''
+	if [ "$#" -gt 0 ]; then
+		suffix="$1"
+		shift
+	fi
+
+	local syslogd
+
+	#syslogd=/sbin/syslogd
+	syslogd="$top_builddir/src/syslogd/syslogd"
+
+	"$syslogd" -n -ddd \
 		-m 1 \
-		-p "$WORKDIR/log" \
-		-P "$WORKDIR/syslog.d" \
-		-f "$WORKDIR/syslog.conf" \
+		-p "$WORKDIR/log${suffix}" \
+		-P "$WORKDIR/syslog${suffix}.d" \
+		-f "$WORKDIR/syslog${suffix}.conf" \
 		"$@" \
-		>"$WORKDIR/syslogd.log" 2>&1
+		>"$WORKDIR/syslogd${suffix}.log" 2>&1 &
+
+	local i=100 rc=1
+	while [ "$i" -gt 0 ]; do
+		if grep -qsi -e 'opened UNIX socket ' "$WORKDIR/syslogd${suffix}.log"; then
+			rc=0
+			break
+		fi
+		i=$(($i - 1))
+		sleep 0.3
+	done
+	return $rc
 }
 
 wait_mark()
 {
-	logger --socket "$WORKDIR/log" -p "user.info" -- "-- MARK --"
-	local c=0
-	while [ "$c" -lt 1 ]; do
-		c="$(grep -c -F -e '-- MARK --' "$WORKDIR/syslog-mark.log")" ||:
+	local suffix=''
+	[ "$#" -eq 0 ] || suffix="$1"
+
+	logger --socket "$WORKDIR/log${suffix}" -p "user.info" -- "-- MARK --"
+
+	local i=100 rc=1
+	while [ "$i" -gt 0 ]; do
+		if grep -qs -F -e '-- MARK --' "$WORKDIR/syslog-mark${suffix}.log"; then
+			rc=0
+			break
+		fi
+		i=$(($i - 1))
+		sleep 0.3
 	done
+	return $rc
 }
 
 normilize_logs()
 {
-	(set +f; sed -r -i -f "$TOPDIR/tests/filter.sed" "$1"/*.log)
+	(set +f; sed -r -i -f "$srcdir/filter.sed" "$1"/*.log)
 }

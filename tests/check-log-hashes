@@ -1,0 +1,34 @@
+#!/bin/sh -efu
+
+if [ -z "${UNSHARE-}" ]; then
+	export UNSHARE=1
+	exec unshare --pid --user --fork --map-root-user --mount-proc "$0"
+fi
+
+name="${0##*/check-}"
+
+. "$srcdir/common.sh"
+
+WORKDIR="$builddir/_build/$name"
+
+prepare "$WORKDIR"
+
+cat > "$WORKDIR/syslog.conf" <<EOF
+log_format: %H %t %h %m
+*.*     $WORKDIR/output/everything.log
+*.info  $WORKDIR/syslog-mark.log
+EOF
+
+run_syslogd
+
+for f in $facilities; do
+	for p in $priorities; do
+		logger \
+			--socket "$WORKDIR/log" \
+			--socket-errors=on \
+			-p "$f.$p" "TEST $f.$p"
+	done
+done
+
+wait_mark
+"$srcdir/verify-hashes.sh" "$WORKDIR/output/everything.log"

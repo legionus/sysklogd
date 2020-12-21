@@ -1,0 +1,34 @@
+#!/bin/sh -efu
+
+if [ -z "${UNSHARE-}" ]; then
+	export UNSHARE=1
+	exec unshare --pid --user --fork --map-root-user --mount-proc "$0"
+fi
+
+name="${0##*/check-}"
+
+. "$srcdir/common.sh"
+
+WORKDIR="$builddir/_build/$name"
+
+prepare "$WORKDIR"
+
+{
+	printf 'log_format: %s\n' "%t %h %m"
+	for n in $facilities; do
+		rm -f -- "$WORKDIR/output/syslog-$n.log"
+		printf '%s.*\t%s\n' "$n" "$WORKDIR/output/syslog-$n.log"
+	done
+	printf '*.info\t%s\n' "$WORKDIR/syslog-mark.log"
+} > "$WORKDIR/syslog.conf"
+
+run_syslogd
+
+for n in $facilities; do
+	logger --socket "$WORKDIR/log" -p "$n.info" "TEST $n"
+done
+
+wait_mark
+normilize_logs "$WORKDIR/output"
+
+diff -rU0 "$srcdir/data/$name/expect" "$WORKDIR/output"
