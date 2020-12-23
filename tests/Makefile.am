@@ -13,6 +13,7 @@ TESTS += check-named-pipes
 TESTS += check-priority-exclamation
 TESTS += check-priority-exclusion
 TESTS += check-priority-splitting
+TESTS += check-net-forward
 
 EXTRA_DIST = common.sh filter.sed data verify-hashes.sh $(TESTS)
 

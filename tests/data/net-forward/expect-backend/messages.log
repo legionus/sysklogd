@@ -1,0 +1,12 @@
+May 1 12:34:56 example.com syslogd 1.6.0: restart (remote reception).
+May 1 12:34:56 example.com user: TEST local0.emerg
+May 1 12:34:56 example.com user: TEST local0.alert
+May 1 12:34:56 example.com user: TEST local0.crit
+May 1 12:34:56 example.com user: TEST local0.err
+May 1 12:34:56 example.com user: TEST local0.warning
+May 1 12:34:56 example.com user: TEST local0.notice
+May 1 12:34:56 example.com user: TEST local0.info
+May 1 12:34:56 example.com user: TEST local0.debug
+May 1 12:34:56 example.com user: TEST local0.panic
+May 1 12:34:56 example.com user: TEST local0.error
+May 1 12:34:56 example.com user: TEST local0.warn

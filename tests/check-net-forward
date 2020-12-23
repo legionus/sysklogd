@@ -1,0 +1,52 @@
+#!/bin/sh -efu
+
+if [ -z "${UNSHARE-}" ]; then
+	export UNSHARE=1
+	exec unshare --pid --net --user --fork --map-root-user --mount-proc "$0"
+fi
+
+name="${0##*/check-}"
+
+. "$srcdir/common.sh"
+
+WORKDIR="$builddir/_build/$name"
+
+ip addr add 127.0.0.1/8 label lo dev lo
+ip link set lo up
+
+prepare "$WORKDIR"
+prepare "$WORKDIR" -backend
+
+cat > "$WORKDIR/syslog.conf" <<EOF
+log_format: %t %h %m
+local0.* @127.0.0.2
+*.*      $WORKDIR/output/messages.log
+*.info   $WORKDIR/syslog-mark.log
+EOF
+
+cat > "$WORKDIR/syslog-backend.conf" <<EOF
+log_format: %t %h %m
+*.*    $WORKDIR/output-backend/messages.log
+*.info $WORKDIR/syslog-mark-backend.log
+EOF
+
+run_syslogd
+run_syslogd -backend -r -i 127.0.0.2
+
+for f in $facilities; do
+	for p in $priorities; do
+		logger \
+			--socket "$WORKDIR/log" \
+			--socket-errors=on \
+			-p "$f.$p" "TEST $f.$p"
+	done
+done
+
+wait_mark
+wait_mark -backend
+
+normilize_logs "$WORKDIR/output"
+normilize_logs "$WORKDIR/output-backend"
+
+diff -rU0 "$srcdir/data/$name/expect" "$WORKDIR/output"
+diff -rU0 "$srcdir/data/$name/expect-backend" "$WORKDIR/output-backend"

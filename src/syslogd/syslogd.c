@@ -1592,7 +1592,7 @@ again:
 	f->f_time = now;
 
 	snprintf(line, sizeof(line), "<%u>%s", f->f_prevpri,
-	         (char *) fmt->iov[LOG_FORMAT_MSG].iov_base);
+	         get_record_field(fmt, LOG_FORMAT_MSG));
 
 	if ((l = strlen(line)) > MAXLINE)
 		l = MAXLINE;
