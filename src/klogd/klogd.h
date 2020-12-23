@@ -29,5 +29,15 @@
 #undef vsyslog
 
 /* Function prototypes. */
-extern void Syslog(int priority, const char *fmt, ...)
-    SYSKLOGD_FORMAT((__printf__, 2, 3)) SYSKLOGD_NONNULL((2));
+void Syslog(int priority, const char *fmt, ...)
+	SYSKLOGD_FORMAT((__printf__, 2, 3))
+	SYSKLOGD_NONNULL((2));
+
+void vsyslog(int pri, const char *fmt, va_list ap)
+	SYSKLOGD_FORMAT((__printf__, 2, 0))
+	SYSKLOGD_NONNULL((2));
+
+void syslog(int pri, const char *fmt, ...)
+	SYSKLOGD_FORMAT((__printf__, 2, 3))
+	SYSKLOGD_NONNULL((2));
+

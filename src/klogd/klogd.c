@@ -23,14 +23,15 @@
 #include <unistd.h>
 #include <signal.h>
 #include <errno.h>
-#include <sys/fcntl.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #if !defined(__GLIBC__)
-#include <linux/time.h>
+//include <linux/time.h>
 #endif /* __GLIBC__ */
 #include <stdarg.h>
 #include <paths.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <grp.h>
 #include "klogd.h"
@@ -38,13 +39,13 @@
 
 #define __LIBRARY__
 #include <linux/unistd.h>
-#if !defined(__GLIBC__)
-#define __NR_ksyslog __NR_syslog
-_syscall3(int, ksyslog, int, type, char *, buf, int, len);
-#else
+//#if !defined(__GLIBC__)
+//#define __NR_ksyslog __NR_syslog
+//_syscall3(int, ksyslog, int, type, char *, buf, int, len);
+//#else
 #include <sys/klog.h>
 #define ksyslog klogctl
-#endif
+//#endif
 
 #ifndef _PATH_DEVNULL
 #define _PATH_DEVNULL "/dev/null"

@@ -1,5 +1,5 @@
 sbin_PROGRAMS = syslogd
-syslogd_CFLAGS  = -I$(srcdir)/..
+syslogd_CFLAGS  = -I$(srcdir)/.. -D_GNU_SOURCE
 syslogd_SOURCES = $(srcdir)/syslogd.c \
 		  $(srcdir)/sha256.c \
 		  $(srcdir)/sha256.h \

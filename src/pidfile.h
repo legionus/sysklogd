@@ -19,13 +19,16 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111, USA.
 */
 
+#include "attribute.h"
+
 /* read_pid
  *
  * Reads the specified pidfile and returns the read pid.
  * 0 is returned if either there's no pidfile, it's empty
  * or no pid can be read.
  */
-int read_pid(const char *pidfile);
+int read_pid(const char *pidfile)
+	SYSKLOGD_NONNULL((1));
 
 /* check_pid
  *
@@ -33,18 +36,21 @@ int read_pid(const char *pidfile);
  * table (using /proc) to determine if the process already exists. If
  * so 1 is returned, otherwise 0.
  */
-int check_pid(const char *pidfile);
+int check_pid(const char *pidfile)
+	SYSKLOGD_NONNULL((1));
 
 /* write_pid
  *
  * Writes the pid to the specified file. If that fails 0 is
  * returned, otherwise the pid.
  */
-int write_pid(const char *pidfile);
+int write_pid(const char *pidfile)
+	SYSKLOGD_NONNULL((1));
 
 /* remove_pid
  *
  * Remove the the specified file. The result from unlink(2)
  * is returned
  */
-int remove_pid(const char *pidfile);
+int remove_pid(const char *pidfile)
+	SYSKLOGD_NONNULL((1));

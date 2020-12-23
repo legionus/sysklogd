@@ -34,6 +34,9 @@
 #include <stdarg.h>
 #include <paths.h>
 #include <stdio.h>
+#include <fcntl.h>
+
+#include "klogd.h"
 
 #define _PATH_LOGNAME "/dev/log"
 
@@ -42,6 +45,14 @@ static int connected;                 /* have done connect */
 static int LogStat        = 0;        /* status bits, set by openlog() */
 static const char *LogTag = "syslog"; /* string to tag the entry with */
 static int LogFacility    = LOG_USER; /* default facility code */
+
+void __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
+	SYSKLOGD_FORMAT((__printf__, 3, 0))
+	SYSKLOGD_NONNULL((3));
+
+void __syslog_chk(int pri, int flag, const char *fmt, ...)
+	SYSKLOGD_FORMAT((__printf__, 3, 4))
+	SYSKLOGD_NONNULL((3));
 
 void __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
 {
