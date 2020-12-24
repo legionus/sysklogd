@@ -2,7 +2,7 @@ dist: focal
 addons:
   apt:
     update: true
-    packages: [ gcc, clang, musl, musl-dev, musl-tools, util-linux, iproute2 ]
+    packages: [ gcc, clang, musl, musl-dev, musl-tools, util-linux, iproute2, autoconf, automake, make ]
 language: c
 branches:
   only:
