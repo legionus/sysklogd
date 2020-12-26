@@ -12,6 +12,6 @@ s/^(May 1 12:34:56) [^[:space:]]+ /\1 example.com /
 s/^(May 1 12:34:56 example.com) [^[:space:]]+: /\1 user: /
 
 # Syslog version
-s/^(May 1 12:34:56 example.com syslogd) [0-9]+.[0-9]+.[0-9]+: (restart\.)/\1 1.6.0: \2/
+s/^(May 1 12:34:56 example.com syslogd) [0-9]+.[0-9]+.[0-9]+: (restart.*\.)/\1 1.6.0: \2/
 
 /-- MARK --/d

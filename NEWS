@@ -1,3 +1,17 @@
+Version 1.7.0
+
+ . Alexey Gladkov <gladkov.alexey@gmail.com>
+   - syslogd: Implement customization of log file records without extra memory
+     allocations.
+   - syslogd: Implement checksum (sha256) chains for log entries as mechanism
+     for detecting intrusion into log files.
+   - syslogd: Allow to have more than 20 inputs.
+   - Use autotools as build system.
+   - Huge source code cleanup.
+
+ . ArkanoiD <ark@owl.openwall.com>
+   - syslogd: Enable unix socket peer credentials check.
+
 Version 1.6.0
 
  . Alexey Gladkov <gladkov.alexey@gmail.com>

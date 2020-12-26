@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([sysklog], [1.6.0], [gladkov.alexey@gmail.com])
+AC_INIT([sysklogd], [1.7.0], [gladkov.alexey@gmail.com])
 AC_CONFIG_SRCDIR([src/attribute.h])
 AC_CONFIG_HEADERS([config.h])
 AC_USE_SYSTEM_EXTENSIONS
