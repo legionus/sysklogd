@@ -1873,8 +1873,9 @@ void reapchild(int sig)
 	int saved_errno = errno;
 	int status;
 
-	while (wait3(&status, WNOHANG, (struct rusage *) NULL) > 0)
+	while (waitpid(-1, &status, WNOHANG) > 0)
 		;
+
 	signal(SIGCHLD, reapchild); /* reset signal handler -ASP */
 	errno = saved_errno;
 }

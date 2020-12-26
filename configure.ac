@@ -38,7 +38,6 @@ AC_FUNC_FORK
 AC_FUNC_LSTAT_FOLLOWS_SLASHED_SYMLINK
 AC_FUNC_MALLOC
 AC_FUNC_STRNLEN
-AC_FUNC_WAIT3
 
 AC_CHECK_FUNC([alarm],         [], [AC_MSG_ERROR([required function 'alarm' is missing.])])
 AC_CHECK_FUNC([epoll_create1], [], [AC_MSG_ERROR([required function 'epoll_create1' is missing.])])
