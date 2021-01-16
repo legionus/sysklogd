@@ -379,6 +379,8 @@ extern int errno;
 
 /* Function prototypes. */
 int main(int argc, char **argv);
+size_t safe_strncpy(char *dest, const char *src, size_t size) SYSKLOGD_NONNULL((1, 2));
+size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
 char **crunch_list(char *list);
 int usage(void);
 void untty(void);
@@ -394,6 +396,12 @@ void set_record_field(struct log_format *log_fmt, enum log_format_type name,
     SYSKLOGD_NONNULL((1));
 void fprintlog(register struct filed *f, const struct sourceinfo *const source,
                int flags, const char *msg);
+void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
+    SYSKLOGD_NONNULL((1, 2, 3));
+void log_users(struct filed *f, struct log_format *fmt)
+    SYSKLOGD_NONNULL((1, 2));
+void log_locally(struct filed *f, struct log_format *fmt, int flags)
+    SYSKLOGD_NONNULL((1, 2));
 void endtty(int);
 void wallmsg(register struct filed *f, struct log_format *log_fmt);
 void reapchild(int);
@@ -423,10 +431,11 @@ int create_inet_sockets(void);
 int drop_root(void);
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
 void set_internal_sinfo(struct sourceinfo *source) SYSKLOGD_NONNULL((1));
+int set_input(enum input_type type, const char *name, int fd);
 
 char *textpri(unsigned int pri);
 
-static size_t safe_strncpy(char *dest, const char *src, size_t size)
+size_t safe_strncpy(char *dest, const char *src, size_t size)
 {
 	size_t ret = strlen(src);
 
@@ -438,7 +447,7 @@ static size_t safe_strncpy(char *dest, const char *src, size_t size)
 	return ret;
 }
 
-static size_t safe_strncat(char *d, const char *s, size_t n)
+size_t safe_strncat(char *d, const char *s, size_t n)
 {
 	size_t l = strnlen(d, n);
 	if (l == n)
@@ -446,7 +455,7 @@ static size_t safe_strncat(char *d, const char *s, size_t n)
 	return l + safe_strncpy(d + l, s, n - l);
 }
 
-static int set_input(enum input_type type, const char *name, int fd)
+int set_input(enum input_type type, const char *name, int fd)
 {
 	struct input *ptr = NULL;
 
@@ -1498,7 +1507,7 @@ void calculate_digest(struct filed *f, struct log_format *fmt)
 	return;
 }
 
-static void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
+void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
 {
 #ifdef SYSLOG_INET
 	size_t l;
@@ -1629,7 +1638,7 @@ again:
 #endif
 }
 
-static void log_locally(struct filed *f, struct log_format *fmt, int flags)
+void log_locally(struct filed *f, struct log_format *fmt, int flags)
 {
 	if (f->f_type == F_CONSOLE) {
 		f->f_time = now;
@@ -1705,7 +1714,7 @@ again:
 		fsync(f->f_file);
 }
 
-static void log_users(struct filed *f, struct log_format *fmt)
+void log_users(struct filed *f, struct log_format *fmt)
 {
 	if (verbose)
 		warnx("log to logged in users %s", TypeNames[f->f_type]);
