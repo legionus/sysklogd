@@ -157,13 +157,27 @@ static int epoll_fd         = -1;
 #define ADDDATE   0x004 /* add a date to the message */
 #define MARK      0x008 /* this message is a mark */
 
+/* values for f_type */
+enum f_type {
+	F_UNUSED = 0, /* unused entry */
+	F_FILE,       /* regular file */
+	F_TTY,        /* terminal */
+	F_CONSOLE,    /* console terminal */
+	F_FORW,       /* remote machine */
+	F_USERS,      /* list of users */
+	F_WALL,       /* everyone logged on */
+	F_FORW_SUSP,  /* suspended host forwarding */
+	F_FORW_UNKN,  /* unknown host forwarding */
+	F_PIPE,       /* named pipe */
+};
+
 /*
  * This structure represents the files that will have log
  * copies printed.
  */
 
 struct filed {
-	short f_type;                        /* entry type, see below */
+	enum f_type f_type;                  /* entry type, see below */
 	int f_file;                          /* file descriptor */
 	time_t f_time;                       /* time this was last written */
 	char *f_host;                        /* host from which to recd. */
@@ -209,17 +223,6 @@ static time_t repeatinterval[] = { 30, 60 }; /* # of secs before flush */
 
 #define LIST_DELIMITER ':' /* delimiter between two hosts */
 
-/* values for f_type */
-#define F_UNUSED    0 /* unused entry */
-#define F_FILE      1 /* regular file */
-#define F_TTY       2 /* terminal */
-#define F_CONSOLE   3 /* console terminal */
-#define F_FORW      4 /* remote machine */
-#define F_USERS     5 /* list of users */
-#define F_WALL      6 /* everyone logged on */
-#define F_FORW_SUSP 7 /* suspended host forwarding */
-#define F_FORW_UNKN 8 /* unknown host forwarding */
-#define F_PIPE      9 /* named pipe */
 static const char *TypeNames[] = {
 	"UNUSED", "FILE", "TTY", "CONSOLE",
 	"FORW", "USERS", "WALL", "FORW(SUSPENDED)",
@@ -2118,6 +2121,8 @@ void init(void)
 				case F_FORW_SUSP:
 					freeaddrinfo(f->f_un.f_forw.f_addr);
 					break;
+				default:
+					break;
 			}
 
 			n = f->next;
@@ -2324,6 +2329,11 @@ void init(void)
 					case F_USERS:
 						for (i = 0; i < MAXUNAMES && *f->f_un.f_uname[i]; i++)
 							printf("%s, ", f->f_un.f_uname[i]);
+						break;
+					case F_WALL:
+						printf("(everyone logged on)");
+						break;
+					case F_UNUSED:
 						break;
 				}
 				printf("\n");
