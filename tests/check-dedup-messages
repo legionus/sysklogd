@@ -23,9 +23,10 @@ run_syslogd
 
 i=0
 while [ $i -lt 100 ]; do
-	logger --socket "$WORKDIR/log" -p "local0.info" --id="1" --tag "USER" "TEST"
+	echo TEST
 	i=$(($i+1))
-done
+done |
+	logger --socket "$WORKDIR/log" -p "local0.info" --tag "USER"
 
 wait_mark
 normilize_logs "$WORKDIR/output"
