@@ -154,8 +154,7 @@ static int epoll_fd         = -1;
 
 #define IGN_CONS  0x001 /* don't print on console */
 #define SYNC_FILE 0x002 /* do fsync on file after printing */
-#define ADDDATE   0x004 /* add a date to the message */
-#define MARK      0x008 /* this message is a mark */
+#define MARK      0x004 /* this message is a mark */
 
 /* values for f_type */
 enum f_type {
@@ -955,7 +954,7 @@ int main(int argc, char **argv)
 		    (now - LastFlushMark) >= MarkInterval) {
 			LastFlushMark = now;
 			set_internal_sinfo(&sinfo);
-			logmsg(LOG_MARK | LOG_INFO, "-- MARK --", &sinfo, ADDDATE | MARK);
+			logmsg(LOG_MARK | LOG_INFO, "-- MARK --", &sinfo, MARK);
 		}
 
 		if (restart) {
@@ -2036,7 +2035,7 @@ void logerror(const char *fmt, ...)
 
 	set_internal_sinfo(&source);
 
-	logmsg(LOG_SYSLOG | LOG_ERR, buf, &source, ADDDATE);
+	logmsg(LOG_SYSLOG | LOG_ERR, buf, &source, 0);
 	errno = 0;
 	return;
 }
@@ -2065,7 +2064,7 @@ void die(int sig)
 			warnx("exiting on signal %d", sig);
 		snprintf(buf, sizeof(buf), "exiting on signal %d", sig);
 		errno = 0;
-		logmsg(LOG_SYSLOG | LOG_INFO, buf, &source, ADDDATE);
+		logmsg(LOG_SYSLOG | LOG_INFO, buf, &source, 0);
 	}
 
 	/* Close the UNIX sockets. */
@@ -2357,9 +2356,9 @@ void init(void)
 	}
 
 	if ((options & OPT_ACCEPT_REMOTE))
-		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart (remote reception).", &source, ADDDATE);
+		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart (remote reception).", &source, 0);
 	else
-		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart.", &source, ADDDATE);
+		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart.", &source, 0);
 
 	signal(SIGHUP, sighup_handler);
 
