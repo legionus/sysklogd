@@ -191,7 +191,7 @@ struct filed {
 		char f_fname[MAXFNAME];
 	} f_un;
 	char f_prevline[MAXSVLINE];          /* last message logged */
-	char f_lasttime[16];                 /* time of last occurrence */
+	time_t f_lasttime;                   /* time of last occurrence */
 	char f_prevhost[MAXHOSTNAMELEN + 1]; /* host from which recd. */
 	unsigned int f_prevpri;              /* pri of f_prevline */
 	size_t f_prevlen;                    /* length of f_prevline */
@@ -941,7 +941,7 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		now = time(NULL);
+		time(&now);
 
 		if (DupesPending > 0 &&
 		    (now - LastFlushDups) >= TIMERINTVL) {
@@ -1247,7 +1247,6 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	struct filed *f;
 	int fac, prilev;
 	size_t msglen;
-	char *timestamp;
 	char newmsg[MAXLINE + 1];
 	sigset_t mask;
 
@@ -1278,7 +1277,6 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	}
 
 	time(&now);
-	timestamp = ctime(&now) + 4;
 
 	/* extract facility and priority level */
 	fac    = LOG_FAC(pri);
@@ -1390,7 +1388,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 		if ((options & OPT_COMPRESS) && (flags & MARK) == 0 && msglen == f->f_prevlen &&
 		    !strcmp(msg, f->f_prevline) &&
 		    !strcmp(from->hostname, f->f_prevhost)) {
-			safe_strncpy(f->f_lasttime, timestamp, sizeof(f->f_lasttime));
+			f->f_lasttime = now;
 			f->f_prevcount++;
 
 			if (verbose)
@@ -1419,9 +1417,9 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			}
 
 			f->f_prevpri     = pri;
+			f->f_lasttime    = now;
 			f->f_repeatcount = 0;
 
-			safe_strncpy(f->f_lasttime, timestamp, sizeof(f->f_lasttime));
 			safe_strncpy(f->f_prevhost, from->hostname, sizeof(f->f_prevhost));
 
 			if (msglen < MAXSVLINE) {
@@ -1728,11 +1726,19 @@ void log_users(struct filed *f, struct log_format *fmt)
 void fprintlog(struct filed *f, const struct sourceinfo *const from,
                int flags, const char *msg)
 {
-	char s_uid[20], s_gid[20], s_pid[20];
+	char s_uid[20], s_gid[20], s_pid[20], f_lasttime[26];
 
 	clear_record_fields(&log_fmt);
 
-	set_record_field(&log_fmt, LOG_FORMAT_TIME, f->f_lasttime, 15);
+	/*
+	 * "Wed Jun 30 21:49:08 1993\n"
+	 *  012345677890123456789
+	 *      01234567890123456
+	 *      ^              ^
+	 */
+	ctime_r(&f->f_lasttime, f_lasttime);
+
+	set_record_field(&log_fmt, LOG_FORMAT_TIME, f_lasttime + 4, 15);
 	set_record_field(&log_fmt, LOG_FORMAT_HOST, f->f_prevhost, -1);
 	set_record_field(&log_fmt, LOG_FORMAT_HASH, f->f_prevhash, -1);
 
