@@ -240,61 +240,25 @@ static const char *TypeNames[] = {
 static struct filed *files = NULL;
 static struct filed consfile;
 
-struct code {
-	const char *c_name;
-	int c_val;
-};
+/*
+ * From busybox-1.31.1:
+ *
+ * musl decided to be funny and it implements these as giant defines
+ * of the form: ((CODE *)(const CODE []){ ... })
+ * Which works, but causes _every_ function using them
+ * to have a copy on stack (at least with gcc-6.3.0).
+ * If we reference them just once, this saves 150 bytes.
+ * The pointers themselves are optimized out
+ * (no size change on uclibc).
+ */
+static const CODE *const bb_prioritynames = prioritynames;
+static const CODE *const bb_facilitynames = facilitynames;
 
-static struct code InputTypeNames[] = {
-	{ "NONE", INPUT_NONE },
-	{ "INET", INPUT_INET },
-	{ "UNIX", INPUT_UNIX },
+static const CODE InputTypeNames[] = {
+	{ (char *) "NONE", INPUT_NONE },
+	{ (char *) "INET", INPUT_INET },
+	{ (char *) "UNIX", INPUT_UNIX },
 	{ NULL, -1 }
-};
-
-static struct code PriNames[] = {
-	{ "alert", LOG_ALERT },
-	{ "crit", LOG_CRIT },
-	{ "debug", LOG_DEBUG },
-	{ "emerg", LOG_EMERG },
-	{ "err", LOG_ERR },
-	{ "error", LOG_ERR }, /* DEPRECATED */
-	{ "info", LOG_INFO },
-	{ "none", INTERNAL_NOPRI }, /* INTERNAL */
-	{ "notice", LOG_NOTICE },
-	{ "panic", LOG_EMERG },  /* DEPRECATED */
-	{ "warn", LOG_WARNING }, /* DEPRECATED */
-	{ "warning", LOG_WARNING },
-	{ "*", TABLE_ALLPRI },
-	{ NULL, -1 }
-};
-
-static struct code FacNames[] = {
-	{ "auth", LOG_AUTH },
-	{ "authpriv", LOG_AUTHPRIV },
-	{ "cron", LOG_CRON },
-	{ "daemon", LOG_DAEMON },
-	{ "kern", LOG_KERN },
-	{ "lpr", LOG_LPR },
-	{ "mail", LOG_MAIL },
-	{ "mark", LOG_MARK }, /* INTERNAL */
-	{ "news", LOG_NEWS },
-	{ "security", LOG_AUTH }, /* DEPRECATED */
-	{ "syslog", LOG_SYSLOG },
-	{ "user", LOG_USER },
-	{ "uucp", LOG_UUCP },
-#if defined(LOG_FTP)
-	{ "ftp", LOG_FTP },
-#endif
-	{ "local0", LOG_LOCAL0 },
-	{ "local1", LOG_LOCAL1 },
-	{ "local2", LOG_LOCAL2 },
-	{ "local3", LOG_LOCAL3 },
-	{ "local4", LOG_LOCAL4 },
-	{ "local5", LOG_LOCAL5 },
-	{ "local6", LOG_LOCAL6 },
-	{ "local7", LOG_LOCAL7 },
-	{ NULL, -1 },
 };
 
 #define SINFO_ISINTERNAL 0x01
@@ -423,8 +387,8 @@ void die(int sig);
 void doexit(int sig);
 void init(void);
 void cfline(const char *line, register struct filed *f);
-int decode(char *name, struct code *codetab);
-const char *print_code_name(int val, struct code *codetab);
+int decode(const char *name, const CODE *codetab) SYSKLOGD_NONNULL((1, 2));
+const char *print_code_name(int val, const CODE *codetab) SYSKLOGD_NONNULL((2));
 struct filed *allocate_log(void);
 int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t,
                          const char *s, size_t n)
@@ -1255,11 +1219,11 @@ void printline(const struct sourceinfo *const source, char *msg)
 char *textpri(unsigned int pri)
 {
 	static char res[20];
-	CODE *c_pri, *c_fac;
+	const CODE *c_pri, *c_fac;
 
-	for (c_fac = facilitynames; c_fac->c_name && !(c_fac->c_val == LOG_FAC(pri) << 3); c_fac++)
+	for (c_fac = bb_facilitynames; c_fac->c_name && !(c_fac->c_val == LOG_FAC(pri) << 3); c_fac++)
 		;
-	for (c_pri = prioritynames; c_pri->c_name && !(c_pri->c_val == LOG_PRI(pri)); c_pri++)
+	for (c_pri = bb_prioritynames; c_pri->c_name && !(c_pri->c_val == LOG_PRI(pri)); c_pri++)
 		;
 
 	snprintf(res, sizeof(res), "%s.%s<%u>", c_fac->c_name, c_pri->c_name, pri);
@@ -2408,7 +2372,7 @@ void cfline(const char *line, struct filed *f)
 	register const char *p;
 	register const char *q;
 	register int i, i2;
-	char *bp;
+	char *bp, *ptr;
 	int pri;
 	int singlpri  = 0;
 	int ignorepri = 0;
@@ -2455,10 +2419,18 @@ void cfline(const char *line, struct filed *f)
 		}
 		if (*buf == '=') {
 			singlpri = 1;
-			pri      = decode(&buf[1], PriNames);
+			ptr      = buf + 1;
 		} else {
 			singlpri = 0;
-			pri      = decode(buf, PriNames);
+			ptr      = buf;
+		}
+
+		if (*ptr == '*') {
+			pri = TABLE_ALLPRI;
+			if (verbose)
+				warnx("symbolic name: %s ==> %d", ptr, pri);
+		} else {
+			pri = decode(ptr, bb_prioritynames);
 		}
 
 		if (pri < 0) {
@@ -2500,7 +2472,7 @@ void cfline(const char *line, struct filed *f)
 					}
 				}
 			} else {
-				i = decode(buf, FacNames);
+				i = decode(buf, bb_facilitynames);
 				if (i < 0) {
 
 					logerror("unknown facility name \"%s\"", buf);
@@ -2664,10 +2636,9 @@ void cfline(const char *line, struct filed *f)
 /*
  *  Decode a symbolic name to a numeric value
  */
-int decode(char *name, struct code *codetab)
+int decode(const char *name, const CODE *c)
 {
-	register struct code *c;
-	register char *p;
+	char *p;
 	char buf[80];
 
 	if (isdigit(*name)) {
@@ -2681,7 +2652,7 @@ int decode(char *name, struct code *codetab)
 		if (isupper(*p))
 			*p = tolower(*p);
 
-	for (c = codetab; c->c_name; c++)
+	for (; c->c_name; c++)
 		if (!strcmp(buf, c->c_name)) {
 			if (verbose)
 				warnx("symbolic name: %s ==> %d", name, c->c_val);
@@ -2693,13 +2664,11 @@ int decode(char *name, struct code *codetab)
 	return -1;
 }
 
-const char *print_code_name(int val, struct code *codetab)
+const char *print_code_name(int val, const CODE *c)
 {
-	struct code *c = codetab;
-	while (c->c_name) {
+	for (; c->c_name; c++) {
 		if (c->c_val == val)
 			return c->c_name;
-		c++;
 	}
 	return "";
 }
