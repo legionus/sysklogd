@@ -2638,27 +2638,23 @@ void cfline(const char *line, struct filed *f)
  */
 int decode(const char *name, const CODE *c)
 {
-	char *p;
-	char buf[80];
-
 	if (isdigit(*name)) {
-		if (verbose)
-			warnx("symbolic name: %s", name);
-		return atoi(name);
+		int val = atoi(name);
+
+		for (; c->c_name; c++)
+			if (val == c->c_val) {
+				if (verbose)
+					warnx("symbolic name: %s", name);
+				return val;
+			}
+	} else {
+		for (; c->c_name; c++)
+			if (!strcasecmp(name, c->c_name)) {
+				if (verbose)
+					warnx("symbolic name: %s ==> %d", name, c->c_val);
+				return c->c_val;
+			}
 	}
-
-	safe_strncpy(buf, name, sizeof(buf));
-	for (p = buf; *p; p++)
-		if (isupper(*p))
-			*p = tolower(*p);
-
-	for (; c->c_name; c++)
-		if (!strcmp(buf, c->c_name)) {
-			if (verbose)
-				warnx("symbolic name: %s ==> %d", name, c->c_val);
-			return c->c_val;
-		}
-
 	if (verbose)
 		warnx("symbolic name: %s => not found", name);
 	return -1;
