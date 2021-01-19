@@ -1,0 +1,47 @@
+#!/bin/sh -efu
+
+if [ -z "${UNSHARE-}" ]; then
+	export UNSHARE=1
+	exec unshare --pid --net --user --fork --map-root-user --mount-proc "$0"
+fi
+
+name="${0##*/check-}"
+
+. "$srcdir/common.sh"
+
+WORKDIR="$builddir/_build/$name"
+
+prepare "$WORKDIR"
+
+cat > "$WORKDIR/syslog.conf" <<EOF
+log_format: %t %h %m
+local0.* @$WORKDIR/socket
+*.*      $WORKDIR/output/messages.log
+*.info   $WORKDIR/syslog-mark.log
+EOF
+
+rm -f -- "$WORKDIR/socket"
+
+socat -v \
+	"UNIX-RECVFROM:$WORKDIR/socket,fork" \
+	"OPEN:$WORKDIR/output/backend.log,creat,append" \
+	>"$WORKDIR/socat.log" 2>&1 &
+
+sleep 1
+
+run_syslogd
+
+for f in $facilities; do
+	for p in $priorities; do
+		logger \
+			--socket "$WORKDIR/log" \
+			--socket-errors=on \
+			-p "$f.$p" "TEST $f.$p"
+	done
+done
+
+wait_mark
+
+normilize_logs "$WORKDIR/output"
+
+diff -rU0 "$srcdir/data/$name/expect" "$WORKDIR/output"

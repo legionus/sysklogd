@@ -201,6 +201,15 @@ is able to sort log messages by host name or program name on the
 central log host.  This way it is possible to split the log into
 separate files.
 
+.SS UNIX domain socket
+In addition to
+.B Remote Machine
+this
+.BR syslogd (8)
+has the ability to forward messages to a UNIX domain socket. To use UNIX domain
+socket, you need to specify the path to the socket after the at sign (``@'').
+The path must start with a slash (``/'').
+
 .SS List of Users
 Usually critical messages are also directed to ``root'' on that
 machine.  You can specify a list of users that ought to receive the

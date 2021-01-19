@@ -156,6 +156,14 @@ static int epoll_fd         = -1;
 #define SYNC_FILE 0x002 /* do fsync on file after printing */
 #define MARK      0x004 /* this message is a mark */
 
+/*
+ * Option for create_unix_socket().
+ */
+enum unixaf_option {
+	UNIXAF_BIND = 0,
+	UNIXAF_CONNECT,
+};
+
 /* values for f_type */
 enum f_type {
 	F_UNUSED = 0, /* unused entry */
@@ -168,6 +176,7 @@ enum f_type {
 	F_FORW_SUSP,  /* suspended host forwarding */
 	F_FORW_UNKN,  /* unknown host forwarding */
 	F_PIPE,       /* named pipe */
+	F_UNIXAF,     /* unix domain socket */
 };
 
 /*
@@ -225,7 +234,7 @@ static time_t repeatinterval[] = { 30, 60 }; /* # of secs before flush */
 static const char *TypeNames[] = {
 	"UNUSED", "FILE", "TTY", "CONSOLE",
 	"FORW", "USERS", "WALL", "FORW(SUSPENDED)",
-	"FORW(UNKNOWN)", "PIPE"
+	"FORW(UNKNOWN)", "PIPE", "UNIXAF"
 };
 
 static struct filed *files = NULL;
@@ -424,7 +433,7 @@ int parse_log_format(struct log_format *log_fmt, const char *s);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
 void sighup_handler(int);
 int set_nonblock_flag(int desc);
-int create_unix_socket(const char *path) SYSKLOGD_NONNULL((1));
+int create_unix_socket(const char *path, enum unixaf_option opt) SYSKLOGD_NONNULL((1));
 ssize_t recv_withcred(int s, void *buf, size_t len, int flags, pid_t *pid, uid_t *uid, gid_t *gid);
 int create_inet_sockets(void);
 int drop_root(void);
@@ -485,32 +494,54 @@ int set_input(enum input_type type, const char *name, int fd)
 }
 
 #ifdef SYSLOG_UNIXAF
-int create_unix_socket(const char *path)
+int create_unix_socket(const char *path, enum unixaf_option option)
 {
 	struct sockaddr_un sunx;
 	int fd;
-	int passcred = 1;
-	socklen_t sl = sizeof(passcred);
 
 	if (path[0] == '\0')
 		return -1;
 
-	unlink(path);
+	if (option == UNIXAF_BIND)
+		unlink(path);
 
 	memset(&sunx, 0, sizeof(sunx));
 	sunx.sun_family = AF_UNIX;
 	safe_strncpy(sunx.sun_path, path, sizeof(sunx.sun_path));
 
 	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-	if (fd < 0 ||
-	    bind(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family) + strlen(sunx.sun_path)) < 0 ||
-	    chmod(path, 0666) < 0) {
+	if (fd < 0) {
 		logerror("cannot create %s: %m", path);
-		close(fd);
-		return -1;
+		goto err;
 	}
-	setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &passcred, sl);
+
+	if (option == UNIXAF_BIND) {
+		int passcred = 1;
+		socklen_t sl = sizeof(passcred);
+
+		if (bind(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family) + strlen(sunx.sun_path)) < 0) {
+			logerror("cannot bind to %s: %m", path);
+			goto err;
+		}
+
+		if (chmod(path, 0666) < 0) {
+			logerror("cannot change permissions of %s: %m", path);
+			goto err;
+		}
+
+		setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &passcred, sl);
+	} else if (option == UNIXAF_CONNECT) {
+		if (connect(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family) + strlen(sunx.sun_path)) < 0) {
+			logerror("cannot connect to %s: %m", path);
+			goto err;
+		}
+	}
+
 	return fd;
+err:
+	if (fd >= 0)
+		close(fd);
+	return -1;
 }
 
 ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
@@ -1672,7 +1703,7 @@ again:
 		int e = errno;
 
 		/* If a named pipe is full, just ignore it for now */
-		if ((f->f_type == F_PIPE || f->f_type == F_TTY) && e == EAGAIN)
+		if ((f->f_type == F_PIPE || f->f_type == F_TTY || f->f_type == F_UNIXAF) && e == EAGAIN)
 			return;
 
 		/*
@@ -1774,6 +1805,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 		case F_TTY:
 		case F_FILE:
 		case F_PIPE:
+		case F_UNIXAF:
 			log_locally(f, &log_fmt, flags);
 			break;
 		case F_USERS:
@@ -2129,6 +2161,7 @@ void init(void)
 				case F_PIPE:
 				case F_TTY:
 				case F_CONSOLE:
+				case F_UNIXAF:
 					close(f->f_file);
 					break;
 				case F_FORW:
@@ -2268,7 +2301,7 @@ void init(void)
 			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, in->fd, NULL);
 			continue;
 		}
-		if ((in->fd = create_unix_socket(in->name)) < 0)
+		if ((in->fd = create_unix_socket(in->name, UNIXAF_BIND)) < 0)
 			continue;
 		if (verbose)
 			warnx("opened UNIX socket `%s' (fd=%d).", in->name, in->fd);
@@ -2329,6 +2362,7 @@ void init(void)
 					case F_PIPE:
 					case F_TTY:
 					case F_CONSOLE:
+					case F_UNIXAF:
 						printf("%s", f->f_un.f_fname);
 						if (f->f_file == -1)
 							printf(" (unused)");
@@ -2521,8 +2555,28 @@ void cfline(const char *line, struct filed *f)
 
 	switch (*p) {
 		case '@':
+			q = ++p;
+#ifdef SYSLOG_UNIXAF
+			if (*q == '/') {
+				safe_strncpy(f->f_un.f_fname, q, sizeof(f->f_un.f_fname));
+
+				if (verbose)
+					warnx("forwarding unix domain socket: %s", p); /*ASP*/
+
+				f->f_type = F_UNIXAF;
+				f->f_file = create_unix_socket(q, UNIXAF_CONNECT);
+
+				if (f->f_file < 0) {
+					f->f_file = -1;
+					break;
+				}
+
+				set_nonblock_flag(f->f_file);
+				break;
+			}
+#endif
 #ifdef SYSLOG_INET
-			safe_strncpy(f->f_un.f_forw.f_hname, ++p, sizeof(f->f_un.f_forw.f_hname));
+			safe_strncpy(f->f_un.f_forw.f_hname, q, sizeof(f->f_un.f_forw.f_hname));
 
 			if (verbose)
 				warnx("forwarding host: %s", p); /*ASP*/
