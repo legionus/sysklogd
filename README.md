@@ -1,4 +1,4 @@
-# Kernel and system logging daemons [![Build Status](https://travis-ci.org/legionus/sysklogd.svg?branch=master)](https://travis-ci.org/legionus/sysklogd)
+# Kernel and system logging daemons
 
 This package is a collection of logging daemons.
 

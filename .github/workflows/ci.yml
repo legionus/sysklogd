@@ -1,0 +1,77 @@
+name: CI
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - v*
+jobs:
+  ubuntu_gcc_glibc_dynamic:
+    name: Tests on ubuntu (gcc / glibc / dynamic)
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+    - name: prepare
+      run: |
+        sudo apt-get update;
+        sudo apt-get install -y autoconf automake make
+        sudo apt-get install -y gcc
+        sudo apt-get install -y util-linux iproute2 socat file valgrind
+    - name: configure
+      run: |
+        ./autogen.sh
+        ./configure
+    - name: build
+      run: |
+        make CC=gcc
+    - name: check
+      run: |
+        make check
+  ubuntu_clang_glibc_dynamic:
+    name: Tests on ubuntu (clang / glibc / dynamic)
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+    - name: prepare
+      run: |
+        sudo apt-get update;
+        sudo apt-get install -y autoconf automake make
+        sudo apt-get install -y clang
+        sudo apt-get install -y util-linux iproute2 socat file valgrind
+    - name: configure
+      run: |
+        ./autogen.sh
+        ./configure
+    - name: build
+      run: |
+        make CC=clang
+    - name: check
+      run: |
+        make check
+  ubuntu_gcc_musl_static:
+    name: Tests on ubuntu (musl-gcc / musl / static)
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+    - name: prepare
+      run: |
+        sudo apt-get update;
+        sudo apt-get install -y autoconf automake make
+        sudo apt-get install -y musl musl-dev musl-tools
+        sudo apt-get install -y util-linux iproute2 socat file valgrind
+    - name: configure
+      run: |
+        ./autogen.sh
+        ./configure
+    - name: build
+      run: |
+        make CC="musl-gcc -static -idirafter /usr/include/ -idirafter /usr/include/x86_64-linux-gnu/"
+    - name: check
+      run: |
+        make check
