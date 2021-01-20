@@ -30,6 +30,7 @@ set -- valgrind \
 	--undef-value-errors=yes \
 	--errors-for-leak-kinds=definite,possible,reachable \
 	--track-origins=yes \
+	--track-fds=yes \
 	--leak-check=full \
 	--leak-resolution=high \
 	--show-leak-kinds=definite,possible,reachable \

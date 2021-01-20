@@ -404,6 +404,7 @@ int drop_root(void);
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
 void set_internal_sinfo(struct sourceinfo *source) SYSKLOGD_NONNULL((1));
 int set_input(enum input_type type, const char *name, int fd);
+void free_files(void);
 
 char *textpri(unsigned int pri);
 
@@ -2042,7 +2043,6 @@ void logerror(const char *fmt, ...)
 
 void die(int sig)
 {
-	struct filed *f, *f_next;
 	char buf[100];
 	int was_initialized = Initialized;
 	struct sourceinfo source;
@@ -2062,16 +2062,6 @@ void die(int sig)
 		logmsg(LOG_SYSLOG | LOG_INFO, buf, &source, 0);
 	}
 
-	f = files;
-	while (f) {
-		f_next = f->next;
-		/* flush any pending output */
-		if (f->f_prevcount)
-			fprintlog(f, &source, 0, NULL);
-		free(f);
-		f = f_next;
-	}
-
 	/* Close the UNIX sockets. */
 	inp = inputs;
 	while (inp) {
@@ -2085,8 +2075,11 @@ void die(int sig)
 		inp = inp_next;
 	}
 
-	free(parts);
+	close(epoll_fd);
+
+	free_files();
 	free_log_format(&log_fmt);
+	free(parts);
 
 	remove_pid(PidFile);
 
@@ -2125,43 +2118,9 @@ void init(void)
 		warnx("called init.");
 	Initialized = 0;
 	if (files) {
-		struct filed *n;
-
 		if (verbose)
 			warnx("initializing log structures.");
-
-		f = files;
-		while (f) {
-			/* flush any pending output */
-			if (f->f_prevcount)
-				fprintlog(f, &source, 0, NULL);
-
-			switch (f->f_type) {
-				case F_FILE:
-				case F_PIPE:
-				case F_TTY:
-				case F_CONSOLE:
-				case F_UNIXAF:
-					close(f->f_file);
-					break;
-				case F_FORW:
-				case F_FORW_SUSP:
-					freeaddrinfo(f->f_un.f_forw.f_addr);
-					break;
-				default:
-					break;
-			}
-
-			n = f->next;
-			free(f);
-			f = n;
-		}
-
-		/*
-		 * This is needed especially when HUPing syslogd as the
-		 * structure would grow infinitively.  -Joey
-		 */
-		files = NULL;
+		free_files();
 	}
 
 	/* Get hostname */
@@ -2903,6 +2862,47 @@ void free_log_format(struct log_format *fmt)
 	free(fmt->line);
 	free(fmt->iov);
 	free(fmt->fields);
+}
+
+void free_files(void)
+{
+	struct filed *f, *next;
+	struct sourceinfo source;
+
+	set_internal_sinfo(&source);
+
+	f = files;
+	while (f) {
+		/* flush any pending output */
+		if (f->f_prevcount)
+			fprintlog(f, &source, 0, NULL);
+
+		switch (f->f_type) {
+			case F_FILE:
+			case F_PIPE:
+			case F_TTY:
+			case F_CONSOLE:
+			case F_UNIXAF:
+				close(f->f_file);
+				break;
+			case F_FORW:
+			case F_FORW_SUSP:
+				freeaddrinfo(f->f_un.f_forw.f_addr);
+				break;
+			default:
+				break;
+		}
+
+		next = f->next;
+		free(f);
+		f = next;
+	}
+
+	/*
+	 * This is needed especially when HUPing syslogd as the
+	 * structure would grow infinitively.  -Joey
+	 */
+	files = NULL;
 }
 
 /*
