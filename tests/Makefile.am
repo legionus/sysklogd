@@ -8,13 +8,13 @@ LOG_DRIVER = env \
 TESTS =
 TESTS += check-dedup-messages
 TESTS += check-facility-splitting
+TESTS += check-forward-net
+TESTS += check-forward-unixaf
 TESTS += check-log-hashes
 TESTS += check-named-pipes
 TESTS += check-priority-exclamation
 TESTS += check-priority-exclusion
 TESTS += check-priority-splitting
-TESTS += check-net-forward
-TESTS += check-unixaf-forward
 
 EXTRA_DIST = common.sh filter.sed data verify-hashes.sh $(TESTS)
 
