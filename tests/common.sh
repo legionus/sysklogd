@@ -29,6 +29,7 @@ run_syslogd()
 	#syslogd=/sbin/syslogd
 	syslogd="$top_builddir/src/syslogd/syslogd"
 
+	${SYSLOGD_WRAPPER-} \
 	"$syslogd" -n -ddd \
 		-m 1 \
 		-p "$WORKDIR/log${suffix}" \
@@ -36,6 +37,7 @@ run_syslogd()
 		-f "$WORKDIR/syslog${suffix}.conf" \
 		"$@" \
 		>"$WORKDIR/syslogd${suffix}.log" 2>&1 &
+	SYSLOGD_PID="$!"
 
 	local i=100 rc=1
 	while [ "$i" -gt 0 ]; do

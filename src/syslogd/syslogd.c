@@ -393,6 +393,7 @@ int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_t
                          const char *s, size_t n)
     SYSKLOGD_NONNULL((1));
 int parse_log_format(struct log_format *log_fmt, const char *s);
+void free_log_format(struct log_format *fmt);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
 void sighup_handler(int);
 int set_nonblock_flag(int desc);
@@ -2041,21 +2042,16 @@ void logerror(const char *fmt, ...)
 
 void die(int sig)
 {
-	struct filed *f;
+	struct filed *f, *f_next;
 	char buf[100];
 	int was_initialized = Initialized;
 	struct sourceinfo source;
+	struct input *inp, *inp_next;
 
 	set_internal_sinfo(&source);
 
 	Initialized = 0; /* Don't log SIGCHLDs in case we
 			   receive one during exiting */
-
-	for (f = files; f; f = f->next) {
-		/* flush any pending output */
-		if (f->f_prevcount)
-			fprintlog(f, &source, 0, NULL);
-	}
 
 	Initialized = was_initialized;
 	if (sig) {
@@ -2066,14 +2062,31 @@ void die(int sig)
 		logmsg(LOG_SYSLOG | LOG_INFO, buf, &source, 0);
 	}
 
-	/* Close the UNIX sockets. */
-	for (struct input *p = inputs; p; p = p->next) {
-		if (p->fd == -1)
-			continue;
-		if (p->type == INPUT_UNIX)
-			unlink(p->name);
-		close(p->fd);
+	f = files;
+	while (f) {
+		f_next = f->next;
+		/* flush any pending output */
+		if (f->f_prevcount)
+			fprintlog(f, &source, 0, NULL);
+		free(f);
+		f = f_next;
 	}
+
+	/* Close the UNIX sockets. */
+	inp = inputs;
+	while (inp) {
+		inp_next = inp->next;
+		if (inp->fd >= 0) {
+			if (inp->type == INPUT_UNIX)
+				unlink(inp->name);
+			close(inp->fd);
+		}
+		free(inp);
+		inp = inp_next;
+	}
+
+	free(parts);
+	free_log_format(&log_fmt);
 
 	remove_pid(PidFile);
 
@@ -2868,6 +2881,10 @@ int parse_log_format(struct log_format *fmt, const char *str)
 	                         LOG_FORMAT_EOL, NULL, 0) < 0)
 		goto error;
 
+	free(fmt->line);
+	free(fmt->iov);
+	free(fmt->fields);
+
 	fmt->line   = new_fmt.line;
 	fmt->iov    = new_fmt.iov;
 	fmt->fields = new_fmt.fields;
@@ -2876,11 +2893,16 @@ int parse_log_format(struct log_format *fmt, const char *str)
 
 	return 0;
 error:
-	free(new_fmt.line);
-	free(new_fmt.iov);
-	free(new_fmt.fields);
+	free_log_format(&new_fmt);
 
 	return -1;
+}
+
+void free_log_format(struct log_format *fmt)
+{
+	free(fmt->line);
+	free(fmt->iov);
+	free(fmt->fields);
 }
 
 /*

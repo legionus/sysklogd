@@ -1,0 +1,53 @@
+#!/bin/sh -efu
+
+if file "$top_builddir/src/syslogd/syslogd" | grep -qs 'statically linked'; then
+	exit 77
+fi
+
+if [ -z "${UNSHARE-}" ]; then
+	export UNSHARE=1
+	exec unshare --pid --user --fork --map-root-user --mount-proc "$0"
+fi
+
+name="${0##*/check-}"
+
+. "$srcdir/common.sh"
+
+WORKDIR="$builddir/_build/$name"
+
+prepare "$WORKDIR"
+
+cat > "$WORKDIR/syslog.conf" <<EOF
+log_format: %t %h %m
+local0.*;local0.!=info  $WORKDIR/output/local0-no-info.log
+local1.*;local1.!err    $WORKDIR/output/local1-less-err.log
+*.info                  $WORKDIR/syslog-mark.log
+EOF
+
+set -- valgrind \
+	--tool=memcheck \
+	--error-exitcode=1 \
+	--undef-value-errors=yes \
+	--errors-for-leak-kinds=definite,possible,reachable \
+	--track-origins=yes \
+	--leak-check=full \
+	--leak-resolution=high \
+	--show-leak-kinds=definite,possible,reachable \
+	--log-file="$WORKDIR/valgrind.log"
+
+SYSLOGD_WRAPPER="$@" \
+run_syslogd
+
+for f in $facilities; do
+	for p in $priorities; do
+		logger \
+			--socket "$WORKDIR/log" \
+			--socket-errors=on \
+			-p "$f.$p" "TEST $f.$p"
+	done
+done
+
+wait_mark
+
+kill -QUIT "$SYSLOGD_PID"
+wait "$SYSLOGD_PID"
