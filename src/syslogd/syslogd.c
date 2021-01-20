@@ -110,7 +110,6 @@
 
 static const char *ConfFile = _PATH_LOGCONF;
 static const char *PidFile  = _PATH_LOGPID;
-static const char ctty[]    = _PATH_CONSOLE;
 
 static char **parts;
 
@@ -871,8 +870,12 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/*
+	 * Prepare console output. The file descriptor will be opened by init()
+	 * if needed.
+	 */
 	consfile.f_type = F_CONSOLE;
-	safe_strncpy(consfile.f_un.f_fname, ctty, sizeof(consfile.f_un.f_fname));
+	safe_strncpy(consfile.f_un.f_fname, _PATH_CONSOLE, sizeof(consfile.f_un.f_fname));
 
 	/* Initialization is done by init() */
 	safe_strncpy(LocalHostName, emptystring, sizeof(LocalHostName));
@@ -1351,7 +1354,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	if (!Initialized) {
 		f = &consfile;
 
-		f->f_file = open(ctty, O_WRONLY | O_NOCTTY);
+		f->f_file = open(f->f_un.f_fname, O_WRONLY | O_NOCTTY);
 
 		if (f->f_file >= 0) {
 			untty();
@@ -2602,7 +2605,7 @@ void cfline(const char *line, struct filed *f)
 				f->f_type = F_TTY;
 				untty();
 			}
-			if (strcmp(p, ctty) == 0)
+			if (!strcmp(p, consfile.f_un.f_fname))
 				f->f_type = F_CONSOLE;
 			break;
 
