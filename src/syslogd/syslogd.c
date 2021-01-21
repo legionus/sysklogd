@@ -150,10 +150,15 @@ static int epoll_fd         = -1;
 /*
  * Flags to logmsg().
  */
-
 #define IGN_CONS  0x001 /* don't print on console */
 #define SYNC_FILE 0x002 /* do fsync on file after printing */
 #define MARK      0x004 /* this message is a mark */
+
+/*
+ * Flags to set_pmask().
+ */
+#define PMASK_FLAG_IGNOREPRI 0x01
+#define PMASK_FLAG_SINGLEPRI 0x02
 
 /*
  * Option for create_unix_socket().
@@ -405,7 +410,7 @@ void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
 void set_internal_sinfo(struct sourceinfo *source) SYSKLOGD_NONNULL((1));
 int set_input(enum input_type type, const char *name, int fd);
 void free_files(void);
-
+void set_pmask(int i, int pri, int flags, struct filed *f) SYSKLOGD_NONNULL((4));
 char *textpri(unsigned int pri);
 
 size_t safe_strncpy(char *dest, const char *src, size_t size)
@@ -2339,6 +2344,30 @@ void init(void)
 		warnx("restarted.");
 }
 
+void set_pmask(int i, int pri, int flags, struct filed *f)
+{
+	if (pri == INTERNAL_NOPRI) {
+		f->f_pmask[i] = (flags & PMASK_FLAG_IGNOREPRI)
+		                    ? TABLE_ALLPRI
+		                    : TABLE_NOPRI;
+	} else if (flags & PMASK_FLAG_SINGLEPRI) {
+		if (flags & PMASK_FLAG_IGNOREPRI)
+			f->f_pmask[i] &= ~(1 << pri);
+		else
+			f->f_pmask[i] |= (1 << pri);
+	} else if (pri == TABLE_ALLPRI) {
+		f->f_pmask[i] = (flags & PMASK_FLAG_IGNOREPRI)
+		                    ? TABLE_NOPRI
+		                    : TABLE_ALLPRI;
+	} else {
+		for (int i2 = 0; i2 <= pri; ++i2)
+			if (flags & PMASK_FLAG_IGNOREPRI)
+				f->f_pmask[i] &= ~(1 << i2);
+			else
+				f->f_pmask[i] |= (1 << i2);
+	}
+}
+
 /*
  * Crack a configuration file line
  */
@@ -2346,11 +2375,9 @@ void cfline(const char *line, struct filed *f)
 {
 	register const char *p;
 	register const char *q;
-	register int i, i2;
+	register int i;
 	char *bp, *ptr;
 	int pri;
-	int singlpri  = 0;
-	int ignorepri = 0;
 	int syncfile;
 #ifdef SYSLOG_INET
 	struct addrinfo hints, *ai;
@@ -2369,6 +2396,7 @@ void cfline(const char *line, struct filed *f)
 
 	/* scan through the list of selectors */
 	for (p = line; *p && *p != '\t' && *p != ' ';) {
+		int flags = 0;
 
 		/* find the end of this facility name list */
 		for (q = p; *q && *q != '\t' && *q++ != '.';)
@@ -2385,19 +2413,16 @@ void cfline(const char *line, struct filed *f)
 
 		/* decode priority name */
 		if (*buf == '!') {
-			ignorepri = 1;
+			flags |= PMASK_FLAG_IGNOREPRI;
 			for (bp = buf; *(bp + 1); bp++)
 				*bp = *(bp + 1);
 			*bp = '\0';
-		} else {
-			ignorepri = 0;
 		}
 		if (*buf == '=') {
-			singlpri = 1;
-			ptr      = buf + 1;
+			flags |= PMASK_FLAG_SINGLEPRI;
+			ptr = buf + 1;
 		} else {
-			singlpri = 0;
-			ptr      = buf;
+			ptr = buf;
 		}
 
 		if (*ptr == '*') {
@@ -2419,66 +2444,14 @@ void cfline(const char *line, struct filed *f)
 				*bp++ = *p++;
 			*bp = '\0';
 			if (*buf == '*') {
-				for (i = 0; i <= LOG_NFACILITIES; i++) {
-					if (pri == INTERNAL_NOPRI) {
-						if (ignorepri)
-							f->f_pmask[i] = TABLE_ALLPRI;
-						else
-							f->f_pmask[i] = TABLE_NOPRI;
-					} else if (singlpri) {
-						if (ignorepri)
-							f->f_pmask[i] &= ~(1 << pri);
-						else
-							f->f_pmask[i] |= (1 << pri);
-					} else {
-						if (pri == TABLE_ALLPRI) {
-							if (ignorepri)
-								f->f_pmask[i] = TABLE_NOPRI;
-							else
-								f->f_pmask[i] = TABLE_ALLPRI;
-						} else {
-							if (ignorepri)
-								for (i2 = 0; i2 <= pri; ++i2)
-									f->f_pmask[i] &= ~(1 << i2);
-							else
-								for (i2 = 0; i2 <= pri; ++i2)
-									f->f_pmask[i] |= (1 << i2);
-						}
-					}
-				}
+				for (i = 0; i <= LOG_NFACILITIES; i++)
+					set_pmask(i, pri, flags, f);
 			} else {
-				i = decode(buf, bb_facilitynames);
-				if (i < 0) {
-
+				if ((i = decode(buf, bb_facilitynames)) < 0) {
 					logerror("unknown facility name \"%s\"", buf);
 					return;
 				}
-
-				if (pri == INTERNAL_NOPRI) {
-					if (ignorepri)
-						f->f_pmask[i >> 3] = TABLE_ALLPRI;
-					else
-						f->f_pmask[i >> 3] = TABLE_NOPRI;
-				} else if (singlpri) {
-					if (ignorepri)
-						f->f_pmask[i >> 3] &= ~(1 << pri);
-					else
-						f->f_pmask[i >> 3] |= (1 << pri);
-				} else {
-					if (pri == TABLE_ALLPRI) {
-						if (ignorepri)
-							f->f_pmask[i >> 3] = TABLE_NOPRI;
-						else
-							f->f_pmask[i >> 3] = TABLE_ALLPRI;
-					} else {
-						if (ignorepri)
-							for (i2 = 0; i2 <= pri; ++i2)
-								f->f_pmask[i >> 3] &= ~(1 << i2);
-						else
-							for (i2 = 0; i2 <= pri; ++i2)
-								f->f_pmask[i >> 3] |= (1 << i2);
-					}
-				}
+				set_pmask(i >> 3, pri, flags, f);
 			}
 			while (*p == ',' || *p == ' ')
 				p++;
