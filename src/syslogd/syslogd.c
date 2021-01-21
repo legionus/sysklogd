@@ -339,8 +339,6 @@ static int family = PF_UNSPEC; /* protocol family (IPv4, IPv6 or both) */
 static int family = PF_INET; /* protocol family (IPv4 only) */
 #endif
 static time_t now           = 0;
-static time_t LastFlushDups = 0;
-static time_t LastFlushMark = 0;
 static int DupesPending     = 0;    /* Number of unflushed duplicate messages */
 static char **StripDomains  = NULL; /* these domains may be stripped before writing logs */
 static char **LocalHosts    = NULL; /* these hosts are logged with their hostname */
@@ -384,6 +382,7 @@ void reapchild(int);
 const char *cvtaddr(struct sockaddr_storage *f, unsigned int len);
 const char *cvthname(struct sockaddr_storage *f, unsigned int len);
 void flush_dups(void);
+void flush_mark(void);
 void debug_switch(int);
 void logerror(const char *fmt, ...)
     SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
@@ -720,6 +719,9 @@ int main(int argc, char **argv)
 	const char *funix_dir = "/etc/syslog.d";
 	const char *devlog    = _PATH_LOG;
 
+	time_t last_flush_dups = 0;
+	time_t last_flush_mark = 0;
+
 	if (chdir("/") < 0)
 		err(1, "chdir to / failed");
 
@@ -948,19 +950,14 @@ int main(int argc, char **argv)
 
 		time(&now);
 
-		if (DupesPending > 0 &&
-		    (now - LastFlushDups) >= TIMERINTVL) {
-			LastFlushDups = now;
-			if (verbose)
-				warnx("flush duplicate messages.");
+		if (DupesPending > 0 && (now - last_flush_dups) >= TIMERINTVL) {
+			last_flush_dups = now;
 			flush_dups();
 		}
 
-		if (MarkInterval > 0 &&
-		    (now - LastFlushMark) >= MarkInterval) {
-			LastFlushMark = now;
-			set_internal_sinfo(&sinfo);
-			logmsg(LOG_MARK | LOG_INFO, "-- MARK --", &sinfo, MARK);
+		if (MarkInterval > 0 && (now - last_flush_mark) >= MarkInterval) {
+			last_flush_mark = now;
+			flush_mark();
 		}
 
 		if (restart) {
@@ -2001,6 +1998,9 @@ void flush_dups(void)
 	struct sourceinfo source;
 	set_internal_sinfo(&source);
 
+	if (verbose)
+		warnx("flush duplicate messages.");
+
 	for (struct filed *f = files; f; f = f->next) {
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
 			if (verbose)
@@ -2012,6 +2012,13 @@ void flush_dups(void)
 			DupesPending--;
 		}
 	}
+}
+
+void flush_mark(void)
+{
+	struct sourceinfo source;
+	set_internal_sinfo(&source);
+	logmsg(LOG_MARK | LOG_INFO, "-- MARK --", &source, MARK);
 }
 
 /*
