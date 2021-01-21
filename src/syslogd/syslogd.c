@@ -390,7 +390,8 @@ void logerror(const char *fmt, ...)
 void die(int sig);
 void doexit(int sig);
 void init(void);
-void cfline(const char *line, register struct filed *f);
+void parse_config_line(const char *line, struct filed *f) SYSKLOGD_NONNULL((1, 2));
+int parse_config_file(const char *filename) SYSKLOGD_NONNULL((1));
 int decode(const char *name, const CODE *codetab) SYSKLOGD_NONNULL((1, 2));
 const char *print_code_name(int val, const CODE *codetab) SYSKLOGD_NONNULL((2));
 struct filed *allocate_log(void);
@@ -2105,12 +2106,9 @@ void doexit(int sig)
 void init(void)
 {
 	register int i, lognum;
-	register FILE *cf;
 	register struct filed *f;
 	register char *p;
 	register unsigned int Forwarding = 0;
-	char cbuf[BUFSIZ];
-	char *cline;
 	struct hostent *hent;
 	struct sourceinfo source;
 
@@ -2163,69 +2161,15 @@ void init(void)
 		if (isupper(*p))
 			*p = tolower(*p);
 
-	/* open the configuration file */
-	if ((cf = fopen(ConfFile, "r")) == NULL) {
-		if (verbose)
-			warnx("cannot open %s.", ConfFile);
-		f = allocate_log();
+	if (parse_config_file(ConfFile) < 0) {
+		if (!(f = allocate_log()))
+			return;
 
-		cfline("*.err\t" _PATH_CONSOLE, f);
+		parse_config_line("*.err\t" _PATH_CONSOLE, f);
 
 		Initialized = 1;
 		return;
 	}
-
-	/*
-	 *  Foreach line in the conf table, open that file.
-	 */
-	cline = cbuf;
-	while (fgets(cline, sizeof(cbuf) - (cline - cbuf), cf) != NULL) {
-		/*
-		 * check for end-of-section, comments, strip off trailing
-		 * spaces and newline character.
-		 */
-		for (p = cline; isspace(*p); ++p)
-			;
-		if (*p == '\0' || *p == '#')
-			continue;
-
-		memmove(cline, p, strlen(p) + 1);
-
-		for (p = strchr(cline, '\0'); isspace(*--p);)
-			;
-
-		if (*p == '\\') {
-			if ((p - cbuf) > BUFSIZ - 30) {
-				/* Oops the buffer is full - what now? */
-				cline = cbuf;
-			} else {
-				*p    = 0;
-				cline = p;
-				continue;
-			}
-		} else
-			cline = cbuf;
-
-		*++p = '\0';
-
-		if (!strncmp("log_format:", cline, 11)) {
-			for (p = cline + 11; isspace(*p); ++p)
-				;
-			parse_log_format(&log_fmt, p);
-			continue;
-		}
-
-		f = allocate_log();
-
-		cfline(cbuf, f);
-
-		if (f->f_type == F_FORW || f->f_type == F_FORW_SUSP || f->f_type == F_FORW_UNKN) {
-			Forwarding++;
-		}
-	}
-
-	/* close the configuration file */
-	fclose(cf);
 
 	if (epoll_fd < 0 &&
 	    (epoll_fd = epoll_create1(EPOLL_CLOEXEC)) < 0) {
@@ -2253,6 +2197,10 @@ void init(void)
 #endif
 
 #ifdef SYSLOG_INET
+	for (f = files; f; f = f->next) {
+		if (f->f_type == F_FORW || f->f_type == F_FORW_SUSP || f->f_type == F_FORW_UNKN)
+			Forwarding++;
+	}
 	if (Forwarding || (options & OPT_ACCEPT_REMOTE)) {
 		if (!InetInuse && create_inet_sockets() > 0) {
 			InetInuse = 1;
@@ -2371,7 +2319,7 @@ void set_pmask(int i, int pri, int flags, struct filed *f)
 /*
  * Crack a configuration file line
  */
-void cfline(const char *line, struct filed *f)
+void parse_config_line(const char *line, struct filed *f)
 {
 	register const char *p;
 	register const char *q;
@@ -2385,7 +2333,7 @@ void cfline(const char *line, struct filed *f)
 	char buf[MAXLINE];
 
 	if (verbose)
-		warnx("cfline(%s)", line);
+		warnx("parse_config_line(%s)", line);
 
 	errno = 0; /* keep strerror() stuff out of logerror messages */
 
@@ -2579,6 +2527,76 @@ void cfline(const char *line, struct filed *f)
 			break;
 	}
 	return;
+}
+
+int parse_config_file(const char *filename)
+{
+	FILE *fd;
+	int rc = -1;
+	char cbuf[BUFSIZ];
+	char *cline;
+
+	if (verbose)
+		warnx("parse_config_file(%s)", filename);
+
+	if (!(fd = fopen(filename, "r"))) {
+		logerror("cannot open %s", filename);
+		return rc;
+	}
+
+	/*
+	 *  Foreach line in the conf table, open that file.
+	 */
+	cline = cbuf;
+	while (fgets(cline, sizeof(cbuf) - (cline - cbuf), fd)) {
+		struct filed *f;
+		char *p;
+
+		/*
+		 * check for end-of-section, comments, strip off trailing
+		 * spaces and newline character.
+		 */
+		for (p = cline; isspace(*p); ++p)
+			;
+		if (*p == '\0' || *p == '#')
+			continue;
+
+		memmove(cline, p, strlen(p) + 1);
+
+		for (p = strchr(cline, '\0'); isspace(*--p);)
+			;
+
+		if (*p == '\\') {
+			if ((p - cbuf) > BUFSIZ - 30) {
+				/* Oops the buffer is full - what now? */
+				cline = cbuf;
+			} else {
+				*p    = 0;
+				cline = p;
+				continue;
+			}
+		} else
+			cline = cbuf;
+
+		*++p = '\0';
+
+		if (!strncmp("log_format:", cbuf, 11)) {
+			for (p = cbuf + 11; isspace(*p); ++p)
+				;
+			parse_log_format(&log_fmt, p);
+			continue;
+		}
+
+		if (!(f = allocate_log()))
+			goto err;
+
+		parse_config_line(cbuf, f);
+	}
+
+	rc = 0;
+err:
+	fclose(fd);
+	return rc;
 }
 
 /*
