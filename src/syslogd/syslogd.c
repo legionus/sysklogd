@@ -49,6 +49,7 @@
 #include <sys/un.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/signalfd.h>
 #include <signal.h>
 
 #include <netinet/in.h>
@@ -114,12 +115,12 @@ static const char *PidFile  = _PATH_LOGPID;
 static char **parts;
 
 static int verbose = 0;
-static int restart = 0;
 
 enum input_type {
 	INPUT_NONE = 0,
 	INPUT_UNIX,
 	INPUT_INET,
+	INPUT_SIGNALFD,
 };
 
 struct input {
@@ -131,6 +132,8 @@ struct input {
 
 static struct input *inputs = NULL;
 static int epoll_fd         = -1;
+static int signal_fd        = -1;
+static sigset_t signal_mask;
 
 #ifdef UT_NAMESIZE
 #define UNAMESZ UT_NAMESIZE /* length of a login name */
@@ -262,6 +265,7 @@ static const CODE InputTypeNames[] = {
 	{ (char *) "NONE", INPUT_NONE },
 	{ (char *) "INET", INPUT_INET },
 	{ (char *) "UNIX", INPUT_UNIX },
+	{ (char *) "SIGNALFD", INPUT_SIGNALFD },
 	{ NULL, -1 }
 };
 
@@ -378,7 +382,6 @@ void log_locally(struct filed *f, struct log_format *fmt, int flags)
     SYSKLOGD_NONNULL((1, 2));
 void endtty(int);
 void wallmsg(register struct filed *f, struct log_format *log_fmt);
-void reapchild(int);
 const char *cvtaddr(struct sockaddr_storage *f, unsigned int len);
 const char *cvthname(struct sockaddr_storage *f, unsigned int len);
 void flush_dups(void);
@@ -400,7 +403,6 @@ int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_t
 int parse_log_format(struct log_format *log_fmt, const char *s);
 void free_log_format(struct log_format *fmt);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
-void sighup_handler(int);
 int set_nonblock_flag(int desc);
 int create_unix_socket(const char *path, enum unixaf_option opt) SYSKLOGD_NONNULL((1));
 ssize_t recv_withcred(int s, void *buf, size_t len, int flags, pid_t *pid, uid_t *uid, gid_t *gid);
@@ -410,6 +412,7 @@ void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
 void set_internal_sinfo(struct sourceinfo *source) SYSKLOGD_NONNULL((1));
 int set_input(enum input_type type, const char *name, int fd);
 void free_files(void);
+void free_inputs(void);
 void set_pmask(int i, int pri, int flags, struct filed *f) SYSKLOGD_NONNULL((4));
 char *textpri(unsigned int pri);
 
@@ -891,13 +894,8 @@ int main(int argc, char **argv)
 	safe_strncpy(LocalHostName, emptystring, sizeof(LocalHostName));
 	LocalDomain = emptystring;
 
-	signal(SIGTERM, die);
-	signal(SIGINT, (options & OPT_FORK) ? SIG_IGN : die);
-	signal(SIGQUIT, (options & OPT_FORK) ? SIG_IGN : die);
-	signal(SIGCHLD, reapchild);
-	signal(SIGALRM, SIG_IGN);
-	signal(SIGUSR1, SIG_IGN);
-	signal(SIGXFSZ, SIG_IGN);
+	sigfillset(&signal_mask);
+	sigprocmask(SIG_SETMASK, &signal_mask, NULL);
 
 	/* Create a partial message table for all file descriptors. */
 	num_fds = getdtablesize();
@@ -937,11 +935,11 @@ int main(int argc, char **argv)
 	 * Main loop begins here.
 	 */
 	for (;;) {
-		struct epoll_event ev[42];
+		struct epoll_event ev[128];
 		int nfds;
 
 		errno = 0;
-		nfds  = epoll_wait(epoll_fd, ev, 42, 1000);
+		nfds  = epoll_wait(epoll_fd, ev, 128, 1000);
 
 		if (nfds < 0 && errno != EINTR) {
 			logerror("epoll_wait: %m");
@@ -958,14 +956,6 @@ int main(int argc, char **argv)
 		if (MarkInterval > 0 && (now - last_flush_mark) >= MarkInterval) {
 			last_flush_mark = now;
 			flush_mark();
-		}
-
-		if (restart) {
-			restart = 0;
-			if (verbose)
-				warnx("received SIGHUP, reloading syslogd.");
-			init();
-			continue;
 		}
 
 		for (i = 0; i < nfds; i++) {
@@ -1026,6 +1016,45 @@ int main(int argc, char **argv)
 				continue;
 			}
 #endif
+			if (p->type == INPUT_SIGNALFD) {
+				int status;
+				struct signalfd_siginfo fdsi;
+
+				if (read(p->fd, &fdsi, sizeof(fdsi)) != sizeof(fdsi)) {
+					logerror("unable to read signal info");
+					continue;
+				}
+
+				if (verbose)
+					warnx("received signal #%d (%s).",
+							fdsi.ssi_signo,
+							strsignal(fdsi.ssi_signo));
+
+				switch (fdsi.ssi_signo) {
+					case SIGINT:
+					case SIGQUIT:
+						if (!(options & OPT_FORK))
+							die(fdsi.ssi_signo);
+						break;
+					case SIGTERM:
+						die(fdsi.ssi_signo);
+						break;
+					case SIGHUP:
+						if (verbose)
+							warnx("reloading syslogd.");
+						init();
+						break;
+					case SIGCHLD:
+						if (waitpid(-1, &status, 0) < 0)
+							logerror("waitpid: %m");
+						break;
+					default:
+						// ignore
+						break;
+				}
+
+				continue;
+			}
 			logerror("Drop unhandled type of input descriptor #%d (%s)",
 			         p->fd, print_code_name(p->type, InputTypeNames));
 			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
@@ -1250,15 +1279,9 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	int fac, prilev;
 	size_t msglen;
 	char newmsg[MAXLINE + 1];
-	sigset_t mask;
 
 	if (verbose)
 		warnx("logmsg: %s, flags %x, from %s, msg %s", textpri(pri), flags, from->hostname, msg);
-
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGHUP);
-	sigaddset(&mask, SIGALRM);
-	sigprocmask(SIG_BLOCK, &mask, NULL);
 
 	/*
 	 * Check to see if msg looks non-standard.
@@ -1320,7 +1343,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 				   invalid */
 				logerror("credentials processing failed -- "
 				         "received malformed message");
-				goto finish;
+				return;
 			}
 		} else {
 			/* As we have pid, validate it */
@@ -1334,7 +1357,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			} else {
 				logerror("credentials processing failed -- "
 				         "received malformed message");
-				goto finish;
+				return;
 			}
 			*oldpid++ = '\0';
 			/* XXX: We could use strtoul() here for full
@@ -1367,7 +1390,6 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			close(f->f_file);
 			f->f_file = -1;
 		}
-		sigprocmask(SIG_UNBLOCK, &mask, NULL);
 		return;
 	}
 
@@ -1435,8 +1457,6 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 			}
 		}
 	}
-finish:
-	sigprocmask(SIG_UNBLOCK, &mask, NULL);
 }
 
 char *get_record_field(struct log_format *fmt, enum log_format_type name)
@@ -1824,6 +1844,8 @@ void wallmsg(struct filed *f, struct log_format *fmt)
 	 * and doing notty().
 	 */
 	if (fork() == 0) {
+		close(signal_fd);
+
 		signal(SIGTERM, SIG_DFL);
 		alarm(0);
 
@@ -1887,18 +1909,6 @@ void wallmsg(struct filed *f, struct log_format *fmt)
 	/* close the user login file */
 	endutent();
 	reenter = 0;
-}
-
-void reapchild(int sig)
-{
-	int saved_errno = errno;
-	int status;
-
-	while (waitpid(-1, &status, WNOHANG) > 0)
-		;
-
-	signal(SIGCHLD, reapchild); /* reset signal handler -ASP */
-	errno = saved_errno;
 }
 
 const char *cvtaddr(struct sockaddr_storage *f, unsigned int len)
@@ -2056,18 +2066,12 @@ void logerror(const char *fmt, ...)
 
 void die(int sig)
 {
-	char buf[100];
-	int was_initialized = Initialized;
 	struct sourceinfo source;
-	struct input *inp, *inp_next;
 
 	set_internal_sinfo(&source);
 
-	Initialized = 0; /* Don't log SIGCHLDs in case we
-			   receive one during exiting */
-
-	Initialized = was_initialized;
 	if (sig) {
+		char buf[100];
 		if (verbose)
 			warnx("exiting on signal %d", sig);
 		snprintf(buf, sizeof(buf), "exiting on signal %d", sig);
@@ -2075,22 +2079,10 @@ void die(int sig)
 		logmsg(LOG_SYSLOG | LOG_INFO, buf, &source, 0);
 	}
 
-	/* Close the UNIX sockets. */
-	inp = inputs;
-	while (inp) {
-		inp_next = inp->next;
-		if (inp->fd >= 0) {
-			if (inp->type == INPUT_UNIX)
-				unlink(inp->name);
-			close(inp->fd);
-		}
-		free(inp);
-		inp = inp_next;
-	}
-
 	close(epoll_fd);
 
 	free_files();
+	free_inputs();
 	free_log_format(&log_fmt);
 	free(parts);
 
@@ -2184,6 +2176,15 @@ void init(void)
 		exit(1);
 	}
 
+	if (signal_fd < 0) {
+		signal_fd = signalfd(-1, &signal_mask, SFD_NONBLOCK | SFD_CLOEXEC);
+		if (signal_fd < 0) {
+			logerror("signalfd: %m");
+			exit(1);
+		}
+		set_input(INPUT_SIGNALFD, NULL, signal_fd);
+	}
+
 #ifdef SYSLOG_UNIXAF
 	for (struct input *in = inputs; in; in = in->next) {
 		if (in->type != INPUT_UNIX)
@@ -2240,7 +2241,8 @@ void init(void)
 		}
 
 		if (verbose)
-			warnx("listening active file descriptor #%d", in->fd);
+			warnx("listening active file descriptor #%d (%s)", in->fd,
+					print_code_name(in->type, InputTypeNames));
 	}
 
 	Initialized = 1;
@@ -2292,8 +2294,6 @@ void init(void)
 		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart (remote reception).", &source, 0);
 	else
 		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart.", &source, 0);
-
-	signal(SIGHUP, sighup_handler);
 
 	if (verbose)
 		warnx("restarted.");
@@ -2862,6 +2862,22 @@ void free_log_format(struct log_format *fmt)
 	free(fmt->fields);
 }
 
+void free_inputs(void)
+{
+	struct input *inp = inputs;
+
+	while (inp) {
+		struct input *inp_next = inp->next;
+		if (inp->fd >= 0) {
+			if (inp->type == INPUT_UNIX)
+				unlink(inp->name);
+			close(inp->fd);
+		}
+		free(inp);
+		inp = inp_next;
+	}
+}
+
 void free_files(void)
 {
 	struct filed *f, *next;
@@ -2901,18 +2917,6 @@ void free_files(void)
 	 * structure would grow infinitively.  -Joey
 	 */
 	files = NULL;
-}
-
-/*
- * The following function is resposible for handling a SIGHUP signal.  Since
- * we are now doing mallocs/free as part of init we had better not being
- * doing this during a signal handler.  Instead this function simply sets
- * a flag variable which will tell the main loop to go through a restart.
- */
-void sighup_handler(int sig)
-{
-	restart = 1;
-	signal(SIGHUP, sighup_handler);
 }
 
 /*
