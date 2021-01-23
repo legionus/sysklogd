@@ -360,7 +360,7 @@ int main(int argc, char **argv);
 size_t safe_strncpy(char *dest, const char *src, size_t size) SYSKLOGD_NONNULL((1, 2));
 size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
 char **crunch_list(char *list);
-int usage(void);
+void usage(void) SYSLOGD_NORETURN();
 void untty(void);
 void printchopped(const struct sourceinfo *const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo *const, char *msg);
@@ -389,9 +389,10 @@ void flush_mark(void);
 void debug_switch(int);
 void logerror(const char *fmt, ...)
     SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
-void die(int sig);
-void doexit(int sig);
+void die(int sig) SYSLOGD_NORETURN();
+void doexit(int sig) SYSLOGD_NORETURN();
 void init(void);
+void event_dispatch(void) SYSLOGD_NORETURN();
 void parse_config_line(const char *line, struct filed *f) SYSKLOGD_NONNULL((1, 2));
 int parse_config_file(const char *filename) SYSKLOGD_NONNULL((1));
 int decode(const char *name, const CODE *codetab) SYSKLOGD_NONNULL((1, 2));
@@ -709,21 +710,156 @@ void add_funix_dir(const char *dname)
 		err(1, "chdir to / failed");
 }
 
+void event_dispatch(void)
+{
+	int i;
+	ssize_t msglen;
+	char line[MAXLINE + 1];
+
+	time_t last_flush_dups = 0;
+	time_t last_flush_mark = 0;
+
+	for (;;) {
+		struct epoll_event ev[128];
+		int nfds;
+
+		errno = 0;
+		nfds  = epoll_wait(epoll_fd, ev, 128, 1000);
+
+		if (nfds < 0 && errno != EINTR) {
+			logerror("epoll_wait: %m");
+			break;
+		}
+
+		time(&now);
+
+		if (DupesPending > 0 && (now - last_flush_dups) >= TIMERINTVL) {
+			last_flush_dups = now;
+			flush_dups();
+		}
+
+		if (MarkInterval > 0 && (now - last_flush_mark) >= MarkInterval) {
+			last_flush_mark = now;
+			flush_mark();
+		}
+
+		for (i = 0; i < nfds; i++) {
+			struct input *p = ev[i].data.ptr;
+#ifdef SYSLOG_UNIXAF
+			if (p->type == INPUT_UNIX) {
+				memset(&sinfo, '\0', sizeof(sinfo));
+				memset(line, 0, sizeof(line));
+
+				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0,
+				                       &sinfo.pid, &sinfo.uid, &sinfo.gid);
+
+				if (verbose)
+					warnx("message from UNIX socket: #%d", p->fd);
+
+				if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
+					logerror("error - credentials not provided");
+				else
+					sinfo.flags = SINFO_HAVECRED;
+
+				if (msglen > 0) {
+					sinfo.hostname = LocalHostName;
+					printchopped(&sinfo, line, msglen + 2, p->fd);
+				} else if (msglen < 0 && errno != EINTR) {
+					logerror("recvfrom UNIX socket: %m");
+				}
+				continue;
+			}
+#endif
+#ifdef SYSLOG_INET
+			if (p->type == INPUT_INET) {
+				struct sockaddr_storage frominet;
+				socklen_t len;
+
+				len = sizeof(frominet);
+
+				memset(line, 0, sizeof(line));
+				memset(&sinfo, '\0', sizeof(sinfo));
+
+				msglen = recvfrom(p->fd, line, MAXLINE - 2, 0,
+				                  (struct sockaddr *) &frominet, &len);
+				if (verbose) {
+					const char *addr = cvtaddr(&frominet, len);
+					if (verbose)
+						warnx("message from inetd socket: host: %s", addr);
+				}
+
+				if (msglen > 0) {
+					/* Note that if cvthname() returns NULL then
+					   we shouldn't attempt to log the line -- jch */
+					sinfo.hostname = (char *) cvthname(&frominet, len);
+					printchopped(&sinfo, line, msglen + 2, p->fd);
+				} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
+					logerror("recvfrom INET socket: %m");
+					/* should be harmless now that we set
+					 * BSDCOMPAT on the socket */
+					sleep(1);
+				}
+				continue;
+			}
+#endif
+			if (p->type == INPUT_SIGNALFD) {
+				int status;
+				struct signalfd_siginfo fdsi;
+
+				if (read(p->fd, &fdsi, sizeof(fdsi)) != sizeof(fdsi)) {
+					logerror("unable to read signal info");
+					continue;
+				}
+
+				if (verbose)
+					warnx("received signal #%d (%s).",
+							fdsi.ssi_signo,
+							strsignal(fdsi.ssi_signo));
+
+				switch (fdsi.ssi_signo) {
+					case SIGINT:
+					case SIGQUIT:
+						if (!(options & OPT_FORK))
+							die(fdsi.ssi_signo);
+						break;
+					case SIGTERM:
+						die(fdsi.ssi_signo);
+						break;
+					case SIGHUP:
+						if (verbose)
+							warnx("reloading syslogd.");
+						init();
+						break;
+					case SIGCHLD:
+						if (waitpid(-1, &status, 0) < 0)
+							logerror("waitpid: %m");
+						break;
+					default:
+						// ignore
+						break;
+				}
+
+				continue;
+			}
+			logerror("Drop unhandled type of input descriptor #%d (%s)",
+			         p->fd, print_code_name(p->type, InputTypeNames));
+			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
+			close(p->fd);
+			p->fd = -1;
+		}
+	}
+	exit(1);
+}
+
 int main(int argc, char **argv)
 {
-	ssize_t msglen;
-	socklen_t len;
 	int num_fds, i, fd, ch;
 	pid_t ppid = getpid();
 
-	char line[MAXLINE + 1];
 	extern int optind;
 	extern char *optarg;
 	const char *funix_dir = "/etc/syslog.d";
 	const char *devlog    = _PATH_LOG;
-
-	time_t last_flush_dups = 0;
-	time_t last_flush_mark = 0;
 
 	if (chdir("/") < 0)
 		err(1, "chdir to / failed");
@@ -931,140 +1067,10 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	/*
-	 * Main loop begins here.
-	 */
-	for (;;) {
-		struct epoll_event ev[128];
-		int nfds;
-
-		errno = 0;
-		nfds  = epoll_wait(epoll_fd, ev, 128, 1000);
-
-		if (nfds < 0 && errno != EINTR) {
-			logerror("epoll_wait: %m");
-			break;
-		}
-
-		time(&now);
-
-		if (DupesPending > 0 && (now - last_flush_dups) >= TIMERINTVL) {
-			last_flush_dups = now;
-			flush_dups();
-		}
-
-		if (MarkInterval > 0 && (now - last_flush_mark) >= MarkInterval) {
-			last_flush_mark = now;
-			flush_mark();
-		}
-
-		for (i = 0; i < nfds; i++) {
-			struct input *p = ev[i].data.ptr;
-#ifdef SYSLOG_UNIXAF
-			if (p->type == INPUT_UNIX) {
-				memset(&sinfo, '\0', sizeof(sinfo));
-				memset(line, 0, sizeof(line));
-
-				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0,
-				                       &sinfo.pid, &sinfo.uid, &sinfo.gid);
-
-				if (verbose)
-					warnx("message from UNIX socket: #%d", p->fd);
-
-				if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
-					logerror("error - credentials not provided");
-				else
-					sinfo.flags = SINFO_HAVECRED;
-
-				if (msglen > 0) {
-					sinfo.hostname = LocalHostName;
-					printchopped(&sinfo, line, msglen + 2, p->fd);
-				} else if (msglen < 0 && errno != EINTR) {
-					logerror("recvfrom UNIX socket: %m");
-				}
-				continue;
-			}
-#endif
-#ifdef SYSLOG_INET
-			if (p->type == INPUT_INET) {
-				struct sockaddr_storage frominet;
-
-				len = sizeof(frominet);
-
-				memset(line, 0, sizeof(line));
-				memset(&sinfo, '\0', sizeof(sinfo));
-
-				msglen = recvfrom(p->fd, line, MAXLINE - 2, 0,
-				                  (struct sockaddr *) &frominet, &len);
-				if (verbose) {
-					const char *addr = cvtaddr(&frominet, len);
-					if (verbose)
-						warnx("message from inetd socket: host: %s", addr);
-				}
-
-				if (msglen > 0) {
-					/* Note that if cvthname() returns NULL then
-					   we shouldn't attempt to log the line -- jch */
-					sinfo.hostname = (char *) cvthname(&frominet, len);
-					printchopped(&sinfo, line, msglen + 2, p->fd);
-				} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
-					logerror("recvfrom INET socket: %m");
-					/* should be harmless now that we set
-					 * BSDCOMPAT on the socket */
-					sleep(1);
-				}
-				continue;
-			}
-#endif
-			if (p->type == INPUT_SIGNALFD) {
-				int status;
-				struct signalfd_siginfo fdsi;
-
-				if (read(p->fd, &fdsi, sizeof(fdsi)) != sizeof(fdsi)) {
-					logerror("unable to read signal info");
-					continue;
-				}
-
-				if (verbose)
-					warnx("received signal #%d (%s).",
-							fdsi.ssi_signo,
-							strsignal(fdsi.ssi_signo));
-
-				switch (fdsi.ssi_signo) {
-					case SIGINT:
-					case SIGQUIT:
-						if (!(options & OPT_FORK))
-							die(fdsi.ssi_signo);
-						break;
-					case SIGTERM:
-						die(fdsi.ssi_signo);
-						break;
-					case SIGHUP:
-						if (verbose)
-							warnx("reloading syslogd.");
-						init();
-						break;
-					case SIGCHLD:
-						if (waitpid(-1, &status, 0) < 0)
-							logerror("waitpid: %m");
-						break;
-					default:
-						// ignore
-						break;
-				}
-
-				continue;
-			}
-			logerror("Drop unhandled type of input descriptor #%d (%s)",
-			         p->fd, print_code_name(p->type, InputTypeNames));
-			epoll_ctl(epoll_fd, EPOLL_CTL_DEL, p->fd, NULL);
-			close(p->fd);
-			p->fd = -1;
-		}
-	}
+	event_dispatch();
 }
 
-int usage(void)
+void usage(void)
 {
 	fprintf(stderr, "usage: syslogd [-46Acdrvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n"
 	                " [-s domainlist] [-f conffile] [-i IP address] [-u username]\n");
