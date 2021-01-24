@@ -280,7 +280,7 @@ struct sourceinfo {
 	gid_t gid;
 	pid_t pid;
 	unsigned int flags;
-} sinfo;
+};
 
 enum log_format_type {
 	LOG_FORMAT_NONE = 0,
@@ -747,10 +747,10 @@ void event_dispatch(void)
 		}
 
 		for (i = 0; i < nfds; i++) {
+			struct sourceinfo sinfo = { 0 };
 			struct input *p = ev[i].data.ptr;
 #ifdef SYSLOG_UNIXAF
 			if (p->type == INPUT_UNIX) {
-				memset(&sinfo, '\0', sizeof(sinfo));
 				memset(line, 0, sizeof(line));
 
 				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0,
@@ -781,7 +781,6 @@ void event_dispatch(void)
 				len = sizeof(frominet);
 
 				memset(line, 0, sizeof(line));
-				memset(&sinfo, '\0', sizeof(sinfo));
 
 				msglen = recvfrom(p->fd, line, MAXLINE - 2, 0,
 				                  (struct sockaddr *) &frominet, &len);
