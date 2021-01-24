@@ -334,7 +334,6 @@ static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
 static const char *emptystring   = "";
 static int InetInuse             = 0;       /* non-zero if INET sockets are being used */
-static int LogFormatInitialized  = 0;       /* set when we have initialized log_format */
 static unsigned int MarkInterval = 20 * 60; /* interval between marks in seconds */
 #ifdef SYSLOG_INET6
 static int family = PF_UNSPEC; /* protocol family (IPv4, IPv6 or both) */
@@ -415,6 +414,11 @@ void free_files(void);
 void free_inputs(void);
 void set_pmask(int i, int pri, int flags, struct filed *f) SYSKLOGD_NONNULL((4));
 char *textpri(unsigned int pri);
+
+static inline int is_logger_initialized(struct log_format *fmt)
+{
+	return (fmt->line != NULL);
+}
 
 size_t safe_strncpy(char *dest, const char *src, size_t size)
 {
@@ -2056,7 +2060,7 @@ void logerror(const char *fmt, ...)
 	if (verbose)
 		warnx("%s", buf + 9);
 
-	if (!LogFormatInitialized) {
+	if (!is_logger_initialized(&log_fmt)) {
 		fputs(buf, stderr);
 		errno = 0;
 		return;
@@ -2846,8 +2850,6 @@ int parse_log_format(struct log_format *fmt, const char *str)
 	fmt->line   = new_fmt.line;
 	fmt->iov    = new_fmt.iov;
 	fmt->fields = new_fmt.fields;
-
-	LogFormatInitialized = 1;
 
 	return 0;
 error:
