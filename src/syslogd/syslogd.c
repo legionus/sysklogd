@@ -334,7 +334,6 @@ static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
 static const char *emptystring   = "";
 static int InetInuse             = 0;       /* non-zero if INET sockets are being used */
-static int Initialized           = 0;       /* set when we have initialized ourselves */
 static int LogFormatInitialized  = 0;       /* set when we have initialized log_format */
 static unsigned int MarkInterval = 20 * 60; /* interval between marks in seconds */
 #ifdef SYSLOG_INET6
@@ -1385,7 +1384,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	}
 
 	/* log the message to the particular outputs */
-	if (!Initialized) {
+	if (!files) {
 		f = &consfile;
 
 		f->f_file = open(f->f_un.f_fname, O_WRONLY | O_NOCTTY);
@@ -2124,7 +2123,7 @@ void init(void)
 	 */
 	if (verbose)
 		warnx("called init.");
-	Initialized = 0;
+
 	if (files) {
 		if (verbose)
 			warnx("initializing log structures.");
@@ -2171,8 +2170,6 @@ void init(void)
 			return;
 
 		parse_config_line("*.err\t" _PATH_CONSOLE, f);
-
-		Initialized = 1;
 		return;
 	}
 
@@ -2250,8 +2247,6 @@ void init(void)
 			warnx("listening active file descriptor #%d (%s)", in->fd,
 					print_code_name(in->type, InputTypeNames));
 	}
-
-	Initialized = 1;
 
 	if (verbose > 1) {
 		for (f = files; f; f = f->next) {
