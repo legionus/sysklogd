@@ -151,7 +151,7 @@ static sigset_t signal_mask;
 #define MAX_PRI 191 /* Maximum Priority per RFC 3164 */
 
 /*
- * Flags to logmsg().
+ * Flags to printmsg().
  */
 #define IGN_CONS  0x001 /* don't print on console */
 #define SYNC_FILE 0x002 /* do fsync on file after printing */
@@ -364,7 +364,7 @@ void usage(void) SYSLOGD_NORETURN();
 void untty(void);
 void printchopped(const struct sourceinfo *const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo *const, char *msg);
-void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const, int flags);
+void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const, int flags);
 void clear_record_fields(struct log_format *log_fmt)
     SYSKLOGD_NONNULL((1));
 void set_record_field(struct log_format *log_fmt, enum log_format_type name,
@@ -1254,7 +1254,7 @@ void printline(const struct sourceinfo *const source, char *msg)
 	}
 	*q = '\0';
 
-	logmsg(pri, line, source, SYNC_FILE);
+	printmsg(pri, line, source, SYNC_FILE);
 	return;
 }
 
@@ -1280,8 +1280,7 @@ char *textpri(unsigned int pri)
  * Log a message to the appropriate log files, users, etc. based on
  * the priority.
  */
-
-void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const from, int flags)
+void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const from, int flags)
 {
 	struct filed *f;
 	int fac, prilev;
@@ -1289,7 +1288,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	char newmsg[MAXLINE + 1];
 
 	if (verbose)
-		warnx("logmsg: %s, flags %x, from %s, msg %s", textpri(pri), flags, from->hostname, msg);
+		warnx("printmsg: %s, flags %x, from %s, msg %s", textpri(pri), flags, from->hostname, msg);
 
 	/*
 	 * Check to see if msg looks non-standard.
@@ -1347,7 +1346,7 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 				         "%s[%u]: ", tag, from->pid);
 			} else {
 				/* Yes, it is safe to call logerror() from this
-				   part of logmsg().  Complain about tag being
+				   part of printmsg().  Complain about tag being
 				   invalid */
 				logerror("credentials processing failed -- "
 				         "received malformed message");
@@ -2032,7 +2031,7 @@ void flush_mark(void)
 {
 	struct sourceinfo source;
 	set_internal_sinfo(&source);
-	logmsg(LOG_MARK | LOG_INFO, "-- MARK --", &source, MARK);
+	printmsg(LOG_MARK | LOG_INFO, "-- MARK --", &source, MARK);
 }
 
 /*
@@ -2063,7 +2062,7 @@ void logerror(const char *fmt, ...)
 
 	set_internal_sinfo(&source);
 
-	logmsg(LOG_SYSLOG | LOG_ERR, buf, &source, 0);
+	printmsg(LOG_SYSLOG | LOG_ERR, buf, &source, 0);
 	errno = 0;
 	return;
 }
@@ -2080,7 +2079,7 @@ void die(int sig)
 			warnx("exiting on signal %d", sig);
 		snprintf(buf, sizeof(buf), "exiting on signal %d", sig);
 		errno = 0;
-		logmsg(LOG_SYSLOG | LOG_INFO, buf, &source, 0);
+		printmsg(LOG_SYSLOG | LOG_INFO, buf, &source, 0);
 	}
 
 	close(epoll_fd);
@@ -2291,9 +2290,9 @@ void init(void)
 	}
 
 	if ((options & OPT_ACCEPT_REMOTE))
-		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart (remote reception).", &source, 0);
+		printmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart (remote reception).", &source, 0);
 	else
-		logmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart.", &source, 0);
+		printmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart.", &source, 0);
 
 	if (verbose)
 		warnx("restarted.");
