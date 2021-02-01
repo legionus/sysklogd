@@ -314,6 +314,8 @@ struct log_format {
 	unsigned int f_mask;
 	struct log_format_field *fields;
 	size_t fields_nr;
+
+	struct iovec values[LOG_FORMAT_COUNTS];
 };
 
 static struct log_format log_fmt = { 0 };
@@ -363,8 +365,6 @@ void untty(void);
 void printchopped(const struct sourceinfo *const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo *const, char *msg);
 void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const, int flags);
-char *get_record_field(struct log_format *log_fmt, enum log_format_type name)
-    SYSKLOGD_NONNULL((1));
 void clear_record_fields(struct log_format *log_fmt)
     SYSKLOGD_NONNULL((1));
 void set_record_field(struct log_format *log_fmt, enum log_format_type name,
@@ -1467,27 +1467,16 @@ void logmsg(unsigned int pri, const char *msg, const struct sourceinfo *const fr
 	}
 }
 
-char *get_record_field(struct log_format *fmt, enum log_format_type name)
-{
-	if (!(fmt->f_mask | (1U << name)))
-		return NULL;
-
-	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
-		if (fmt->fields[i].f_type == name)
-			return fmt->fields[i].f_iov->iov_base;
-	}
-	return NULL;
-}
-
 void set_record_field(struct log_format *fmt,
                       enum log_format_type name, const char *value, ssize_t len)
 {
-	size_t iov_len;
+	size_t iov_len = len == -1 ? strlen(value) : len;
+
+	fmt->values[name].iov_base = (void *) value;
+	fmt->values[name].iov_len  = iov_len;
 
 	if (!(fmt->f_mask | (1U << name)))
 		return;
-
-	iov_len = len == -1 ? strlen(value) : len;
 
 	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
 		if (fmt->fields[i].f_type == name) {
@@ -1502,6 +1491,10 @@ void clear_record_fields(struct log_format *fmt)
 	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
 		fmt->fields[i].f_iov->iov_base = NULL;
 		fmt->fields[i].f_iov->iov_len  = 0;
+	}
+	for (int i = 0; i < LOG_FORMAT_COUNTS; i++) {
+		fmt->values[i].iov_base = NULL;
+		fmt->values[i].iov_len  = 0;
 	}
 }
 
@@ -1631,8 +1624,9 @@ again:
 
 	f->f_time = now;
 
-	snprintf(line, sizeof(line), "<%u>%s", f->f_prevpri,
-	         get_record_field(fmt, LOG_FORMAT_MSG));
+	snprintf(line, sizeof(line), "<%u>%.*s", f->f_prevpri,
+	         (int) fmt->values[LOG_FORMAT_MSG].iov_len,
+	         (char *) fmt->values[LOG_FORMAT_MSG].iov_base);
 
 	if ((l = strlen(line)) > MAXLINE)
 		l = MAXLINE;
@@ -1859,8 +1853,10 @@ void wallmsg(struct filed *f, struct log_format *fmt)
 
 		if (f->f_type == F_WALL) {
 			snprintf(greetings, sizeof(greetings),
-			         "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
-			         get_record_field(fmt, LOG_FORMAT_HOST), ctime(&now));
+			         "\r\n\7Message from syslogd@%.*s at %.24s ...\r\n",
+			         (int) fmt->values[LOG_FORMAT_HOST].iov_len,
+			         (char *) fmt->values[LOG_FORMAT_HOST].iov_base,
+			         ctime(&now));
 
 			set_record_field(fmt, LOG_FORMAT_BOL, greetings, -1);
 		}
