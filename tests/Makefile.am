@@ -11,6 +11,7 @@ TESTS += check-facility-splitting
 TESTS += check-forward-net
 TESTS += check-forward-unixaf
 TESTS += check-log-hashes
+TESTS += check-long-messages
 TESTS += check-named-pipes
 TESTS += check-priority-exclamation
 TESTS += check-priority-exclusion
