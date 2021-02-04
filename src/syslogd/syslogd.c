@@ -291,6 +291,7 @@ enum log_format_type {
 	LOG_FORMAT_PID,
 	LOG_FORMAT_UID,
 	LOG_FORMAT_GID,
+	LOG_FORMAT_PRI,
 	LOG_FORMAT_MSG,
 	LOG_FORMAT_EOL,
 	LOG_FORMAT_COUNTS,
@@ -1749,7 +1750,7 @@ void log_users(struct filed *f, struct log_format *fmt)
 void fprintlog(struct filed *f, const struct sourceinfo *const from,
                int flags, const char *msg)
 {
-	char s_uid[20], s_gid[20], s_pid[20], f_lasttime[26];
+	char s_uid[20], s_gid[20], s_pid[20], s_pri[20], f_lasttime[26];
 
 	clear_record_fields(&log_fmt);
 
@@ -1773,6 +1774,9 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 
 	snprintf(s_pid, sizeof(s_pid), "%d", from->pid);
 	set_record_field(&log_fmt, LOG_FORMAT_PID, s_pid, -1);
+
+	snprintf(s_pri, sizeof(s_pri), "%d", f->f_prevpri);
+	set_record_field(&log_fmt, LOG_FORMAT_PRI, s_pri, -1);
 
 	if (msg) {
 		set_record_field(&log_fmt, LOG_FORMAT_MSG, msg, -1);
@@ -2784,6 +2788,9 @@ int parse_log_format(struct log_format *fmt, const char *str)
 					break;
 				case 'p':
 					f_type = LOG_FORMAT_PID;
+					break;
+				case 'P':
+					f_type = LOG_FORMAT_PRI;
 					break;
 				case 'H':
 					f_type = LOG_FORMAT_HASH;
