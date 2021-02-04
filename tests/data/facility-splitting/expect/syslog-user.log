@@ -1,2 +1,2 @@
-May 1 12:34:56 example.com user: TEST kern
-May 1 12:34:56 example.com user: TEST user
+May 1 12:34:56 example root[123]: TEST kern
+May 1 12:34:56 example root[123]: TEST user

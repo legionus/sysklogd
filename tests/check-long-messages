@@ -2,7 +2,7 @@
 
 if [ -z "${UNSHARE-}" ]; then
 	export UNSHARE=1
-	exec unshare --pid --user --fork --map-root-user --mount-proc "$0"
+	exec unshare --pid --user --uts --fork --map-root-user --mount-proc "$0"
 fi
 
 name="${0##*/check-}"
@@ -30,7 +30,7 @@ while [ $i -lt 10 ]; do
 			n=$(($n + 1))
 		done
 	} |
-		logger --socket "$WORKDIR/log" -p "local0.info" --tag "USER"
+		logger --socket "$WORKDIR/log" -p "local0.info" --tag "root"
 	i=$(($i+1))
 done
 

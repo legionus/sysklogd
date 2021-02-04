@@ -5,13 +5,11 @@ s/^(Jan(uary)?|Feb(ruary)?|Mar(ch)?|Apr(il)?|May|Jun(e)?|Jul(y)?|Aug(ust)?|Sep(t
 s/^(May) [0-9]{1,2} /\1 1 /
 s/^(May 1) [0-9]{2}:[0-9]{2}:[0-9]{2} /\1 12:34:56 /
 
-# Hostname
-s/^(May 1 12:34:56) [^[:space:]]+ /\1 example.com /
-
-# Username
-s/^(May 1 12:34:56 example.com) [^[:space:]]+: /\1 user: /
+# Pid
+s/^(May 1 12:34:56 example root)\[[[:digit:]]+\]: /\1[123]: /
+s/^(May 1 12:34:56 localhost root)\[[[:digit:]]+\]: /\1[456]: /
 
 # Syslog version
-s/^(May 1 12:34:56 example.com syslogd) [0-9]+.[0-9]+.[0-9]+: (restart.*\.)/\1 1.6.0: \2/
+s/^(May 1 12:34:56 example syslogd) [0-9]+.[0-9]+.[0-9]+: (restart.*\.)/\1 1.6.0: \2/
 
 /-- MARK --/d

@@ -1,2 +1,2 @@
-May 1 12:34:56 example.com syslogd 1.6.0: restart.
-May 1 12:34:56 example.com user: TEST syslog
+May 1 12:34:56 example syslogd 1.6.0: restart.
+May 1 12:34:56 example root[123]: TEST syslog

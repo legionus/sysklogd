@@ -2,7 +2,7 @@
 
 if [ -z "${UNSHARE-}" ]; then
 	export UNSHARE=1
-	exec unshare --pid --net --user --fork --map-root-user --mount-proc "$0"
+	exec unshare --pid --net --user --uts --fork --map-root-user --mount-proc "$0"
 fi
 
 name="${0##*/check-}"

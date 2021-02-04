@@ -14,6 +14,8 @@ prepare()
 		"$1/output${suffix}" \
 		"$1/syslog${suffix}.d"
 	:>"$1/syslog-mark${suffix}.log"
+
+	hostname example.org
 }
 
 run_syslogd()
