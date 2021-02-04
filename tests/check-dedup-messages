@@ -21,12 +21,16 @@ EOF
 
 run_syslogd
 
-i=0
-while [ $i -lt 100 ]; do
-	echo TEST
-	i=$(($i+1))
-done |
-	logger --socket "$WORKDIR/log" -p "local0.info" --tag "USER"
+for n in 1 2 3; do
+	logger --socket "$WORKDIR/log" -p "local0.info" --tag "USER" "DO TEST $n"
+	i=0
+	while [ $i -lt 100 ]; do
+		echo "TEST$n"
+		i=$(($i+1))
+	done |
+		logger --socket "$WORKDIR/log" -p "local0.info" --tag "USER"
+	logger --socket "$WORKDIR/log" -p "local0.info" --tag "USER" "DONE TEST $n"
+done
 
 wait_mark
 normilize_logs "$WORKDIR/output"

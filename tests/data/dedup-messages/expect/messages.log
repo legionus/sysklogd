@@ -1,3 +1,13 @@
 May 1 12:34:56 example.com syslogd 1.6.0: restart.
-May 1 12:34:56 example.com user: TEST
+May 1 12:34:56 example.com user: DO TEST 1
+May 1 12:34:56 example.com user: TEST1
 May 1 12:34:56 example.com last message repeated 99 times
+May 1 12:34:56 example.com user: DONE TEST 1
+May 1 12:34:56 example.com user: DO TEST 2
+May 1 12:34:56 example.com user: TEST2
+May 1 12:34:56 example.com last message repeated 99 times
+May 1 12:34:56 example.com user: DONE TEST 2
+May 1 12:34:56 example.com user: DO TEST 3
+May 1 12:34:56 example.com user: TEST3
+May 1 12:34:56 example.com last message repeated 99 times
+May 1 12:34:56 example.com user: DONE TEST 3
