@@ -7,6 +7,7 @@ LOG_DRIVER = env \
 
 TESTS =
 TESTS += check-dedup-messages
+TESTS += check-dedup-messages-disabled
 TESTS += check-facility-splitting
 TESTS += check-forward-net
 TESTS += check-forward-unixaf
