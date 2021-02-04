@@ -319,8 +319,10 @@ struct log_format {
 	struct iovec values[LOG_FORMAT_COUNTS];
 };
 
-static struct log_format log_fmt = { 0 };
-static long int iovec_max        = 0;
+static struct log_format log_fmt    = { 0 };
+static struct log_format remote_fmt = { 0 };
+
+static long int iovec_max = 0;
 
 enum option_flag {
 	OPT_SEND_TO_ALL   = (1 << 0), /* send message to all IPv4/IPv6 addresses */
@@ -963,6 +965,9 @@ int main(int argc, char **argv)
 	if (parse_log_format(&log_fmt, "%t %h (uid=%u) %m") < 0)
 		exit(1);
 
+	if (parse_log_format(&remote_fmt, "<%P>%m") < 0)
+		exit(1);
+
 	if ((options & OPT_FORK)) {
 		pid_t pid;
 
@@ -1531,8 +1536,7 @@ void calculate_digest(struct filed *f, struct log_format *fmt)
 void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
 {
 #ifdef SYSLOG_INET
-	size_t l;
-	char line[MAXLINE + 1];
+	size_t msglen = 0;
 	time_t fwd_suspend;
 	struct addrinfo hints, *ai;
 	int err;
@@ -1624,24 +1628,31 @@ again:
 
 	f->f_time = now;
 
-	snprintf(line, sizeof(line), "<%u>%.*s", f->f_prevpri,
-	         (int) fmt->values[LOG_FORMAT_MSG].iov_len,
-	         (char *) fmt->values[LOG_FORMAT_MSG].iov_base);
+	set_record_field(&remote_fmt, LOG_FORMAT_PRI,
+			fmt->values[LOG_FORMAT_PRI].iov_base,
+			fmt->values[LOG_FORMAT_PRI].iov_len);
 
-	if ((l = strlen(line)) > MAXLINE)
-		l = MAXLINE;
+	set_record_field(&remote_fmt, LOG_FORMAT_MSG,
+			fmt->values[LOG_FORMAT_MSG].iov_base,
+			fmt->values[LOG_FORMAT_MSG].iov_len);
+
+	for (int i = 0; i < LOG_FORMAT_IOVEC_MAX; i++)
+		msglen += remote_fmt.iov[i].iov_len;
 
 	err = -1;
 	for (ai = f->f_un.f_forw.f_addr; ai; ai = ai->ai_next) {
-		for (struct input *p = inputs; p; p = p->next) {
-			ssize_t lsent;
+		struct msghdr msg = { 0 };
 
+		msg.msg_name    = ai->ai_addr;
+		msg.msg_namelen = ai->ai_addrlen;
+		msg.msg_iov     = remote_fmt.iov;
+		msg.msg_iovlen  = LOG_FORMAT_IOVEC_MAX;
+
+		for (struct input *p = inputs; p; p = p->next) {
 			if (p->fd == -1 || p->type != INPUT_INET)
 				continue;
 
-			lsent = sendto(p->fd, line, l, 0, ai->ai_addr, ai->ai_addrlen);
-
-			if (lsent == l) {
+			if (sendmsg(p->fd, &msg, 0) == msglen) {
 				err = -1;
 				break;
 			}
@@ -1655,7 +1666,7 @@ again:
 		f->f_type = F_FORW_SUSP;
 
 		errno = err;
-		logerror("sendto: %m");
+		logerror("sendmsg: %m");
 	}
 #endif
 }
@@ -2091,6 +2102,7 @@ void die(int sig)
 	free_files();
 	free_inputs();
 	free_log_format(&log_fmt);
+	free_log_format(&remote_fmt);
 	free(parts);
 
 	remove_pid(PidFile);
