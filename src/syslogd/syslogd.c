@@ -297,24 +297,14 @@ enum log_format_type {
 	LOG_FORMAT_COUNTS,
 };
 
-#define LOG_FORMAT_REPEAT_MAX 5
-#define LOG_FORMAT_FIELDS_MAX LOG_FORMAT_COUNTS *LOG_FORMAT_REPEAT_MAX
-#define LOG_FORMAT_IOVEC_MAX  LOG_FORMAT_FIELDS_MAX * 2 + 1
-
-struct log_format_field {
-	enum log_format_type f_type;
-	struct iovec *f_iov;
-};
-
 struct log_format {
 	char *line;
 
-	struct iovec *iov;
-	size_t iovec_nr;
+	enum log_format_type *type; /* list of iov element types */
+	struct iovec *iov;          /* log format parts and placeholders for message parts */
+	size_t iov_nr;              /* number of elements in type and iov lists */
 
-	unsigned int f_mask;
-	struct log_format_field *fields;
-	size_t fields_nr;
+	unsigned int mask;
 
 	struct iovec values[LOG_FORMAT_COUNTS];
 };
@@ -399,9 +389,7 @@ int parse_config_file(const char *filename) SYSKLOGD_NONNULL((1));
 int decode(const char *name, const CODE *codetab) SYSKLOGD_NONNULL((1, 2));
 const char *print_code_name(int val, const CODE *codetab) SYSKLOGD_NONNULL((2));
 struct filed *allocate_log(void);
-int set_log_format_field(struct log_format *log_fmt, size_t i, enum log_format_type t,
-                         const char *s, size_t n)
-    SYSKLOGD_NONNULL((1));
+int set_log_format_field(struct log_format *log_fmt, enum log_format_type t, const char *s, size_t n) SYSKLOGD_NONNULL((1));
 int parse_log_format(struct log_format *log_fmt, const char *s);
 void free_log_format(struct log_format *fmt);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
@@ -1480,22 +1468,24 @@ void set_record_field(struct log_format *fmt,
 	fmt->values[name].iov_base = (void *) value;
 	fmt->values[name].iov_len  = iov_len;
 
-	if (!(fmt->f_mask | (1U << name)))
+	if (!(fmt->mask | (1U << name)))
 		return;
 
-	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
-		if (fmt->fields[i].f_type == name) {
-			fmt->fields[i].f_iov->iov_base = (void *) value;
-			fmt->fields[i].f_iov->iov_len  = iov_len;
+	for (int i = 0; i < fmt->iov_nr; i++) {
+		if (fmt->type[i] == name) {
+			fmt->iov[i].iov_base = (void *) value;
+			fmt->iov[i].iov_len  = iov_len;
 		}
 	}
 }
 
 void clear_record_fields(struct log_format *fmt)
 {
-	for (int i = 0; i < LOG_FORMAT_FIELDS_MAX && fmt->fields[i].f_iov; i++) {
-		fmt->fields[i].f_iov->iov_base = NULL;
-		fmt->fields[i].f_iov->iov_len  = 0;
+	for (int i = 0; i < fmt->iov_nr; i++) {
+		if (fmt->type[i] != LOG_FORMAT_NONE) {
+			fmt->iov[i].iov_base = NULL;
+			fmt->iov[i].iov_len  = 0;
+		}
 	}
 	for (int i = 0; i < LOG_FORMAT_COUNTS; i++) {
 		fmt->values[i].iov_base = NULL;
@@ -1509,13 +1499,13 @@ void calculate_digest(struct filed *f, struct log_format *fmt)
 	unsigned char digest[HASH_RAWSZ];
 	hash_ctx_t hash_ctx;
 
-	if (!(fmt->f_mask | (1 << LOG_FORMAT_HASH)))
+	if (!(fmt->mask | (1 << LOG_FORMAT_HASH)))
 		return;
 
 	digest[0] = 0;
 
 	hash_init(&hash_ctx);
-	for (i = 0; i < LOG_FORMAT_IOVEC_MAX; i++)
+	for (i = 0; i < fmt->iov_nr; i++)
 		hash_update(&hash_ctx, fmt->iov[i].iov_base, fmt->iov[i].iov_len);
 	hash_final(digest, &hash_ctx);
 
@@ -1636,7 +1626,7 @@ again:
 			fmt->values[LOG_FORMAT_MSG].iov_base,
 			fmt->values[LOG_FORMAT_MSG].iov_len);
 
-	for (int i = 0; i < LOG_FORMAT_IOVEC_MAX; i++)
+	for (int i = 0; i < remote_fmt.iov_nr; i++)
 		msglen += remote_fmt.iov[i].iov_len;
 
 	err = -1;
@@ -1646,7 +1636,7 @@ again:
 		msg.msg_name    = ai->ai_addr;
 		msg.msg_namelen = ai->ai_addrlen;
 		msg.msg_iov     = remote_fmt.iov;
-		msg.msg_iovlen  = LOG_FORMAT_IOVEC_MAX;
+		msg.msg_iovlen  = remote_fmt.iov_nr;
 
 		for (struct input *p = inputs; p; p = p->next) {
 			if (p->fd == -1 || p->type != INPUT_INET)
@@ -1704,7 +1694,7 @@ again:
 
 	calculate_digest(f, fmt);
 
-	if (writev(f->f_file, fmt->iov, LOG_FORMAT_IOVEC_MAX) < 0) {
+	if (writev(f->f_file, fmt->iov, fmt->iov_nr) < 0) {
 		int e = errno;
 
 		/* If a named pipe is full, just ignore it for now */
@@ -1913,7 +1903,7 @@ void wallmsg(struct filed *f, struct log_format *fmt)
 					struct stat statb;
 
 					if (!fstat(ttyf, &statb) && (statb.st_mode & S_IWRITE)) {
-						if (writev(ttyf, fmt->iov, LOG_FORMAT_IOVEC_MAX) < 0)
+						if (writev(ttyf, fmt->iov, fmt->iov_nr) < 0)
 							errno = 0; /* ignore */
 					}
 					close(ttyf);
@@ -2682,29 +2672,37 @@ struct filed *allocate_log(void)
 	return files;
 }
 
-int set_log_format_field(struct log_format *fmt, size_t i,
-                         enum log_format_type t, const char *s, size_t n)
+int set_log_format_field(struct log_format *fmt, enum log_format_type t, const char *s, size_t n)
 {
-	if (i >= iovec_max) {
+	struct iovec *iov;
+	enum log_format_type *type;
+
+	if (fmt->iov_nr >= iovec_max) {
 		logerror("Too many parts in the log_format string");
 		return -1;
 	}
 
-	if (t != LOG_FORMAT_NONE) {
-		if (fmt->fields_nr >= LOG_FORMAT_FIELDS_MAX) {
-			logerror("Too many placeholders in the log_format string");
-			return -1;
-		}
+	iov = realloc(fmt->iov, sizeof(*iov) * (fmt->iov_nr + 1));
+	if (!iov) {
+		logerror("Cannot allocate record for log_format string");
+		return -1;
+	}
+	fmt->iov = iov;
 
-		fmt->f_mask |= (1U << t);
-		fmt->fields[fmt->fields_nr].f_type = t;
-		fmt->fields[fmt->fields_nr].f_iov  = fmt->iov + i;
-		fmt->fields_nr++;
+	fmt->iov[fmt->iov_nr].iov_base = (char *) s;
+	fmt->iov[fmt->iov_nr].iov_len  = n;
+
+	type = realloc(fmt->type, sizeof(*type) * (fmt->iov_nr + 1));
+	if (!type) {
+		logerror("Cannot allocate field for log_format string");
+		return -1;
 	}
 
-	fmt->iov[i].iov_base = (void *) s;
-	fmt->iov[i].iov_len  = n;
-	fmt->iovec_nr++;
+	fmt->type = type;
+	fmt->type[fmt->iov_nr] = t;
+	fmt->mask |= (1U << t);
+
+	fmt->iov_nr++;
 
 	return 0;
 }
@@ -2713,33 +2711,20 @@ int parse_log_format(struct log_format *fmt, const char *str)
 {
 	const char *ptr, *start;
 	int i, special;
-	size_t field_nr;
 	struct log_format new_fmt = { 0 };
 
 	iovec_max = sysconf(_SC_IOV_MAX);
 
-	new_fmt.line = calloc(1, LINE_MAX);
+	new_fmt.line = strdup(str);
 	if (!new_fmt.line) {
 		logerror("Cannot allocate log_format string");
-		goto error;
-	}
-
-	new_fmt.iov = calloc(LOG_FORMAT_IOVEC_MAX, sizeof(struct iovec));
-	if (!new_fmt.iov) {
-		logerror("Cannot allocate records array for log_format string");
-		goto error;
-	}
-
-	new_fmt.fields = calloc(LOG_FORMAT_FIELDS_MAX, sizeof(struct log_format_field));
-	if (!new_fmt.fields) {
-		logerror("Cannot allocate rules array for log_format string");
 		goto error;
 	}
 
 	ptr = str;
 	i = special = 0;
 
-	while (*ptr != '\0' && i < LINE_MAX) {
+	while (*ptr != '\0') {
 		char c = *ptr++;
 
 		switch (c) {
@@ -2769,11 +2754,9 @@ int parse_log_format(struct log_format *fmt, const char *str)
 		special           = 0;
 	}
 
-	field_nr = 0;
-	special  = 0;
-	i        = 0;
+	special = 0;
 
-	if (set_log_format_field(&new_fmt, field_nr++, LOG_FORMAT_BOL, NULL, 0) < 0)
+	if (set_log_format_field(&new_fmt, LOG_FORMAT_BOL, NULL, 0) < 0)
 		goto error;
 
 	start = ptr = new_fmt.line;
@@ -2824,18 +2807,16 @@ int parse_log_format(struct log_format *fmt, const char *str)
 		continue;
 	create_field:
 		if ((ptr - start - 1) > 0 &&
-		    set_log_format_field(&new_fmt, field_nr++,
-		                         LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
+		    set_log_format_field(&new_fmt, LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
 			goto error;
 
-		if (set_log_format_field(&new_fmt, field_nr++, f_type, NULL, 0) < 0)
+		if (set_log_format_field(&new_fmt, f_type, NULL, 0) < 0)
 			goto error;
 
 		start = ptr + 1;
 		goto next;
 	create_special:
-		if (set_log_format_field(&new_fmt, field_nr++,
-		                         LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
+		if (set_log_format_field(&new_fmt, LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
 			goto error;
 
 		start = ptr;
@@ -2848,21 +2829,20 @@ int parse_log_format(struct log_format *fmt, const char *str)
 	}
 
 	if (start != ptr &&
-	    set_log_format_field(&new_fmt, field_nr++,
-	                         LOG_FORMAT_NONE, start, (size_t)(ptr - start)) < 0)
+	    set_log_format_field(&new_fmt, LOG_FORMAT_NONE, start, (size_t)(ptr - start)) < 0)
 		goto error;
 
-	if (set_log_format_field(&new_fmt, field_nr++,
-	                         LOG_FORMAT_EOL, NULL, 0) < 0)
+	if (set_log_format_field(&new_fmt, LOG_FORMAT_EOL, NULL, 0) < 0)
 		goto error;
 
 	free(fmt->line);
 	free(fmt->iov);
-	free(fmt->fields);
+	free(fmt->type);
 
 	fmt->line   = new_fmt.line;
 	fmt->iov    = new_fmt.iov;
-	fmt->fields = new_fmt.fields;
+	fmt->iov_nr = new_fmt.iov_nr;
+	fmt->type   = new_fmt.type;
 
 	return 0;
 error:
@@ -2875,7 +2855,7 @@ void free_log_format(struct log_format *fmt)
 {
 	free(fmt->line);
 	free(fmt->iov);
-	free(fmt->fields);
+	free(fmt->type);
 }
 
 void free_inputs(void)
