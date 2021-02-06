@@ -272,7 +272,7 @@ struct log_format {
 static struct log_format log_fmt    = { 0 };
 static struct log_format remote_fmt = { 0 };
 
-static long int iovec_max = 0;
+static ssize_t iovec_max = 0;
 
 enum option_flag {
 	OPT_SEND_TO_ALL   = (1 << 0), /* send message to all IPv4/IPv6 addresses */
@@ -2634,7 +2634,7 @@ int set_log_format_field(struct log_format *fmt, enum log_format_type t, const c
 	struct iovec *iov;
 	enum log_format_type *type;
 
-	if (fmt->iov_nr >= iovec_max) {
+	if (fmt->iov_nr >= (size_t) iovec_max) {
 		logerror("Too many parts in the log_format string");
 		return -1;
 	}
@@ -2671,6 +2671,10 @@ int parse_log_format(struct log_format *fmt, const char *str)
 	struct log_format new_fmt = { 0 };
 
 	iovec_max = sysconf(_SC_IOV_MAX);
+	if (iovec_max < 0) {
+		logerror("unable to get maximum number of `iovec' structures that one process");
+		iovec_max = 1024;
+	}
 
 	new_fmt.line = strdup(str);
 	if (!new_fmt.line) {
