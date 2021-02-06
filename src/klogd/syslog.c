@@ -54,7 +54,7 @@ void __syslog_chk(int pri, int flag, const char *fmt, ...)
 	SYSKLOGD_FORMAT((__printf__, 3, 4))
 	SYSKLOGD_NONNULL((3));
 
-void __vsyslog_chk(int pri, int flag, const char *fmt, va_list ap)
+void __vsyslog_chk(int pri, SYSKLOGD_UNUSED(int flag), const char *fmt, va_list ap)
 {
 	register int cnt;
 	register char *p;

@@ -115,12 +115,12 @@ static void CloseLogSrc(void)
 /*
  * Signal handler to terminate the parent process.
  */
-static void doexit(int sig)
+static void doexit(SYSKLOGD_UNUSED(int sig))
 {
 	exit(0);
 }
 
-static void restart(int sig)
+static void restart(SYSKLOGD_UNUSED(int sig))
 {
 	signal(SIGCONT, restart);
 	change_state = 1;
@@ -128,7 +128,7 @@ static void restart(int sig)
 	return;
 }
 
-static void stop_logging(int sig)
+static void stop_logging(SYSKLOGD_UNUSED(int sig))
 {
 	signal(SIGTSTP, stop_logging);
 	change_state = 1;
@@ -136,7 +136,7 @@ static void stop_logging(int sig)
 	return;
 }
 
-static void stop_daemon(int sig)
+static void stop_daemon(SYSKLOGD_UNUSED(int sig))
 {
 	Terminate();
 }

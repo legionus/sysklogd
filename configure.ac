@@ -49,6 +49,7 @@ CC_CHECK_CFLAGS_APPEND([\
 	-fomit-frame-pointer \
 	-fno-strength-reduce \
 	-Wall \
+	-Wextra \
 	-Wstrict-prototypes \
 	-Wmissing-declarations \
 	-Wmissing-prototypes \

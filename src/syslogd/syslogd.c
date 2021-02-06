@@ -350,7 +350,7 @@ void free_log_format(struct log_format *fmt);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
 int set_nonblock_flag(int desc);
 int create_unix_socket(const char *path, enum unixaf_option opt) SYSKLOGD_NONNULL((1));
-ssize_t recv_withcred(int s, void *buf, size_t len, int flags, pid_t *pid, uid_t *uid, gid_t *gid);
+ssize_t recv_withcred(int s, void *buf, size_t len, int flags, struct sourceinfo *sinfo);
 int create_inet_sockets(void);
 int drop_root(void);
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
@@ -467,8 +467,7 @@ err:
 	return -1;
 }
 
-ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
-                      pid_t *pid, uid_t *uid, gid_t *gid)
+ssize_t recv_withcred(int s, void *buf, size_t len, int flags, struct sourceinfo *sinfo)
 {
 	struct cmsghdr *cmptr;
 	struct msghdr m;
@@ -495,22 +494,13 @@ ssize_t recv_withcred(int s, void *buf, size_t len, int flags,
 	    (cmptr = (m.msg_controllen >= sizeof(struct cmsghdr)) ? CMSG_FIRSTHDR(&m) : NULL) &&
 	    (cmptr->cmsg_level == SOL_SOCKET) &&
 	    (cmptr->cmsg_type == SCM_CREDENTIALS)) {
-		if (pid)
-			*pid = ((struct ucred *) CMSG_DATA(cmptr))->pid;
-		if (uid)
-			*uid = ((struct ucred *) CMSG_DATA(cmptr))->uid;
-		if (gid)
-			*gid = ((struct ucred *) CMSG_DATA(cmptr))->gid;
-	} else
-#endif // SCM_CREDENTIALS
-	{
-		if (pid)
-			*pid = (pid_t) -1;
-		if (uid)
-			*uid = (uid_t) -1;
-		if (gid)
-			*gid = (gid_t) -1;
+		sinfo->pid = ((struct ucred *) CMSG_DATA(cmptr))->pid;
+		sinfo->uid = ((struct ucred *) CMSG_DATA(cmptr))->uid;
+		sinfo->gid = ((struct ucred *) CMSG_DATA(cmptr))->gid;
+
+		sinfo->flags |= SINFO_HAVECRED;
 	}
+#endif // SCM_CREDENTIALS
 
 	return rc;
 }
@@ -641,7 +631,7 @@ void add_funix_dir(const char *dname)
 			char buf[MAXPATHLEN];
 			ssize_t n = readlink(entry->d_name, buf, sizeof(buf));
 
-			if ((n <= 0) || (n >= sizeof(buf)) || (buf[0] != '/'))
+			if ((n <= 0) || ((size_t) n >= sizeof(buf)) || (buf[0] != '/'))
 				continue;
 			buf[n] = '\0';
 
@@ -699,16 +689,13 @@ void event_dispatch(void)
 			if (p->type == INPUT_UNIX) {
 				memset(line, 0, sizeof(line));
 
-				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0,
-				                       &sinfo.pid, &sinfo.uid, &sinfo.gid);
+				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0, &sinfo);
 
 				if (verbose)
 					warnx("message from UNIX socket: #%d", p->fd);
 
-				if (sinfo.uid == -1 || sinfo.gid == -1 || sinfo.pid == -1)
+				if (!(sinfo.flags & SINFO_HAVECRED))
 					logerror("error - credentials not provided");
-				else
-					sinfo.flags = SINFO_HAVECRED;
 
 				if (msglen > 0) {
 					sinfo.hostname = LocalHostName;
@@ -1219,9 +1206,9 @@ char *textpri(unsigned int pri)
 	static char res[20];
 	const CODE *c_pri, *c_fac;
 
-	for (c_fac = bb_facilitynames; c_fac->c_name && !(c_fac->c_val == LOG_FAC(pri) << 3); c_fac++)
+	for (c_fac = bb_facilitynames; c_fac->c_name && !(c_fac->c_val == (int) LOG_FAC(pri) << 3); c_fac++)
 		;
-	for (c_pri = bb_prioritynames; c_pri->c_name && !(c_pri->c_val == LOG_PRI(pri)); c_pri++)
+	for (c_pri = bb_prioritynames; c_pri->c_name && !(c_pri->c_val == (int) LOG_PRI(pri)); c_pri++)
 		;
 
 	snprintf(res, sizeof(res), "%s.%s<%u>", c_fac->c_name, c_pri->c_name, pri);
@@ -1422,7 +1409,7 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 void set_record_field(struct log_format *fmt,
                       enum log_format_type name, const char *value, ssize_t len)
 {
-	size_t iov_len = len == -1 ? strlen(value) : len;
+	size_t iov_len = len == -1 ? strlen(value) : (size_t) len;
 
 	fmt->values[name].iov_base = (void *) value;
 	fmt->values[name].iov_len  = iov_len;
@@ -1430,7 +1417,7 @@ void set_record_field(struct log_format *fmt,
 	if (!(fmt->mask | (1U << name)))
 		return;
 
-	for (int i = 0; i < fmt->iov_nr; i++) {
+	for (size_t i = 0; i < fmt->iov_nr; i++) {
 		if (fmt->type[i] == name) {
 			fmt->iov[i].iov_base = (void *) value;
 			fmt->iov[i].iov_len  = iov_len;
@@ -1440,13 +1427,13 @@ void set_record_field(struct log_format *fmt,
 
 void clear_record_fields(struct log_format *fmt)
 {
-	for (int i = 0; i < fmt->iov_nr; i++) {
+	for (size_t i = 0; i < fmt->iov_nr; i++) {
 		if (fmt->type[i] != LOG_FORMAT_NONE) {
 			fmt->iov[i].iov_base = NULL;
 			fmt->iov[i].iov_len  = 0;
 		}
 	}
-	for (int i = 0; i < LOG_FORMAT_COUNTS; i++) {
+	for (size_t i = 0; i < LOG_FORMAT_COUNTS; i++) {
 		fmt->values[i].iov_base = NULL;
 		fmt->values[i].iov_len  = 0;
 	}
@@ -1454,7 +1441,7 @@ void clear_record_fields(struct log_format *fmt)
 
 void calculate_digest(struct filed *f, struct log_format *fmt)
 {
-	int i, n;
+	size_t i, n;
 	unsigned char digest[HASH_RAWSZ];
 	hash_ctx_t hash_ctx;
 
@@ -1484,7 +1471,7 @@ void calculate_digest(struct filed *f, struct log_format *fmt)
 void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
 {
 #ifdef SYSLOG_INET
-	size_t msglen = 0;
+	ssize_t msglen = 0;
 	time_t fwd_suspend;
 	struct addrinfo hints, *ai;
 	int err;
@@ -1584,7 +1571,7 @@ again:
 			fmt->values[LOG_FORMAT_MSG].iov_base,
 			fmt->values[LOG_FORMAT_MSG].iov_len);
 
-	for (int i = 0; i < remote_fmt.iov_nr; i++)
+	for (size_t i = 0; i < remote_fmt.iov_nr; i++)
 		msglen += remote_fmt.iov[i].iov_len;
 
 	err = -1;
@@ -1776,7 +1763,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 
 static jmp_buf ttybuf;
 
-void endtty(int sig)
+void endtty(SYSKLOGD_UNUSED(int sig))
 {
 	longjmp(ttybuf, 1);
 }
@@ -2060,7 +2047,7 @@ void die(int sig)
 /*
  * Signal handler to terminate the parent process.
  */
-void doexit(int sig)
+void doexit(SYSKLOGD_UNUSED(int sig))
 {
 	_exit(0);
 }
