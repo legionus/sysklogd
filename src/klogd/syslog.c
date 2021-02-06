@@ -20,7 +20,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/file.h>
-#include <sys/signal.h>
 #include <sys/syslog.h>
 #undef syslog
 #undef vsyslog
@@ -35,6 +34,7 @@
 #include <paths.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #include "klogd.h"
 

@@ -32,12 +32,12 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <time.h>
+#include <errno.h>
 #include <err.h>
 
 #define SYSLOG_NAMES
 #include <sys/syslog.h>
 #include <sys/param.h>
-#include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -69,48 +69,8 @@
 
 #include <paths.h>
 
-#ifndef UTMP_FILE
-#ifdef UTMP_FILENAME
-#define UTMP_FILE UTMP_FILENAME
-#else
-#ifdef _PATH_UTMP
-#define UTMP_FILE _PATH_UTMP
-#else
-#define UTMP_FILE "/etc/utmp"
-#endif
-#endif
-#endif
-
-#ifndef _PATH_LOGCONF
-#define _PATH_LOGCONF "/etc/syslog.conf"
-#endif
-
-#ifndef _PATH_LOGPID
-#define _PATH_LOGPID _PATH_VARRUN "syslogd.pid"
-#endif
-
-#ifndef _PATH_DEV
-#define _PATH_DEV "/dev/"
-#endif
-
-#ifndef _PATH_CONSOLE
-#define _PATH_CONSOLE "/dev/console"
-#endif
-
-#ifndef _PATH_TTY
-#define _PATH_TTY "/dev/tty"
-#endif
-
-#ifndef _PATH_LOG
-#define _PATH_LOG "/dev/log"
-#endif
-
-#ifndef _PATH_DEVNULL
-#define _PATH_DEVNULL "/dev/null"
-#endif
-
-static const char *ConfFile = _PATH_LOGCONF;
-static const char *PidFile  = _PATH_LOGPID;
+static const char *ConfFile = "/etc/syslog.conf";
+static const char *PidFile  = _PATH_VARRUN "syslogd.pid";
 
 static char **parts;
 
@@ -344,16 +304,12 @@ static char *bind_addr   = NULL; /* bind UDP port to this interface only */
 static char *server_user = NULL; /* user name to run server as */
 static char *chroot_dir  = NULL; /* user name to run server as */
 
-#ifndef errno
-extern int errno;
-#endif
-
 /* Function prototypes. */
 int main(int argc, char **argv);
 size_t safe_strncpy(char *dest, const char *src, size_t size) SYSKLOGD_NONNULL((1, 2));
 size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
 char **crunch_list(char *list);
-void usage(void) SYSLOGD_NORETURN();
+void usage(void) SYSKLOGD_NORETURN();
 void untty(void);
 void printchopped(const struct sourceinfo *const, char *msg, size_t len, int fd);
 void printline(const struct sourceinfo *const, char *msg);
@@ -378,12 +334,11 @@ const char *cvthname(struct sockaddr_storage *f, unsigned int len);
 void flush_dups(void);
 void flush_mark(void);
 void debug_switch(int);
-void logerror(const char *fmt, ...)
-    SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
-void die(int sig) SYSLOGD_NORETURN();
-void doexit(int sig) SYSLOGD_NORETURN();
+void logerror(const char *fmt, ...) SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
+void die(int sig) SYSKLOGD_NORETURN();
+void doexit(int sig) SYSKLOGD_NORETURN();
 void init(void);
-void event_dispatch(void) SYSLOGD_NORETURN();
+void event_dispatch(void) SYSKLOGD_NORETURN();
 void parse_config_line(const char *line, struct filed *f) SYSKLOGD_NONNULL((1, 2));
 int parse_config_file(const char *filename) SYSKLOGD_NONNULL((1));
 int decode(const char *name, const CODE *codetab) SYSKLOGD_NONNULL((1, 2));
@@ -1162,24 +1117,31 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 				warnx("previous: %s", tmpline);
 				warnx("next: %s", msg);
 			}
+
 			safe_strncat(tmpline, msg, sizeof(tmpline)); /* length checked above */
+
 			printline(source, tmpline);
+
 			if ((strlen(msg) + 1) == len)
 				return;
-			else
-				start = strchr(msg, '\0') + 1;
+
+			start = strchr(msg, '\0') + 1;
 		}
 	}
 
 	if (msg[len - 1] != '\0') {
 		msg[len] = '\0';
+
 		for (p = msg + len - 1; *p != '\0' && p > msg;)
 			--p;
-		if (*p == '\0') p++;
+		if (*p == '\0')
+			p++;
+
 		ptlngth = strlen(p);
-		if ((parts[fd] = malloc(ptlngth + 1)) == NULL)
+
+		if ((parts[fd] = malloc(ptlngth + 1)) == NULL) {
 			logerror("cannot allocate memory for message part.");
-		else {
+		} else {
 			safe_strncpy(parts[fd], p, ptlngth + 1);
 			if (verbose)
 				warnx("saving partial msg: %s", parts[fd]);
@@ -1192,8 +1154,6 @@ void printchopped(const struct sourceinfo *const source, char *msg, size_t len, 
 		printline(source, start);
 		start = end + 1;
 	} while (*start != '\0');
-
-	return;
 }
 
 /*
@@ -1249,7 +1209,6 @@ void printline(const struct sourceinfo *const source, char *msg)
 	*q = '\0';
 
 	printmsg(pri, line, source, SYNC_FILE);
-	return;
 }
 
 /*
@@ -1520,7 +1479,6 @@ void calculate_digest(struct filed *f, struct log_format *fmt)
 		n += 2;
 	}
 	f->f_prevhash[n] = 0;
-	return;
 }
 
 void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
@@ -2069,7 +2027,6 @@ void logerror(const char *fmt, ...)
 
 	printmsg(LOG_SYSLOG | LOG_ERR, buf, &source, 0);
 	errno = 0;
-	return;
 }
 
 void die(int sig)
@@ -2113,7 +2070,7 @@ void doexit(int sig)
  */
 void init(void)
 {
-	register int i, lognum;
+	register int i, lognum = 0;
 	register struct filed *f;
 	register char *p;
 	register unsigned int Forwarding = 0;
@@ -2292,6 +2249,7 @@ void init(void)
 				}
 				printf("\n");
 			}
+			lognum++;
 		}
 	}
 
@@ -2538,7 +2496,6 @@ void parse_config_line(const char *line, struct filed *f)
 			f->f_type = F_USERS;
 			break;
 	}
-	return;
 }
 
 int parse_config_file(const char *filename)
