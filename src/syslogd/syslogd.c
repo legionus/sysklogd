@@ -350,7 +350,7 @@ void free_log_format(struct log_format *fmt);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
 int set_nonblock_flag(int desc);
 int create_unix_socket(const char *path, enum unixaf_option opt) SYSKLOGD_NONNULL((1));
-ssize_t recv_withcred(int s, void *buf, size_t len, int flags, struct sourceinfo *sinfo);
+ssize_t recv_withcred(int s, void *buf, size_t len, struct sourceinfo *sinfo);
 int create_inet_sockets(void);
 int drop_root(void);
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
@@ -467,7 +467,7 @@ err:
 	return -1;
 }
 
-ssize_t recv_withcred(int s, void *buf, size_t len, int flags, struct sourceinfo *sinfo)
+ssize_t recv_withcred(int s, void *buf, size_t len, struct sourceinfo *sinfo)
 {
 	struct cmsghdr *cmptr;
 	struct msghdr m;
@@ -486,8 +486,10 @@ ssize_t recv_withcred(int s, void *buf, size_t len, int flags, struct sourceinfo
 	m.msg_control    = control;
 	m.msg_controllen = sizeof(control);
 
-	if ((rc = recvmsg(s, &m, flags)) < 0)
+	if ((rc = recvmsg(s, &m, 0)) < 0)
 		return rc;
+
+	sinfo->hostname = LocalHostName;
 
 #ifdef SCM_CREDENTIALS
 	if (!(m.msg_flags & MSG_CTRUNC) &&
@@ -689,7 +691,7 @@ void event_dispatch(void)
 			if (p->type == INPUT_UNIX) {
 				memset(line, 0, sizeof(line));
 
-				msglen = recv_withcred(p->fd, line, MAXLINE - 2, 0, &sinfo);
+				msglen = recv_withcred(p->fd, line, MAXLINE - 2, &sinfo);
 
 				if (verbose)
 					warnx("message from UNIX socket: #%d", p->fd);
@@ -698,7 +700,6 @@ void event_dispatch(void)
 					logerror("error - credentials not provided");
 
 				if (msglen > 0) {
-					sinfo.hostname = LocalHostName;
 					printchopped(&sinfo, line, msglen + 2, p->fd);
 				} else if (msglen < 0 && errno != EINTR) {
 					logerror("recvfrom UNIX socket: %m");
