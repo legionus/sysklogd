@@ -11,6 +11,7 @@ TESTS += check-dedup-messages-disabled
 TESTS += check-facility-splitting
 TESTS += check-forward-net
 TESTS += check-forward-unixaf
+TESTS += check-fuzzer-net
 TESTS += check-log-hashes
 TESTS += check-long-messages
 TESTS += check-named-pipes
@@ -24,3 +25,4 @@ EXTRA_DIST = common.sh filter.sed data verify-hashes.sh $(TESTS)
 
 clean-local:
 	rm -rf -- $(abs_builddir)/_build
+	rm -rf -- $(abs_builddir)/boofuzz-results

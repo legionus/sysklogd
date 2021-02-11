@@ -18,7 +18,7 @@ jobs:
         sudo apt-get update;
         sudo apt-get install -y autoconf automake make
         sudo apt-get install -y gcc
-        sudo apt-get install -y util-linux iproute2 socat file valgrind
+        sudo apt-get install -y util-linux iproute2 socat file valgrind python3-pip python3-venv
     - name: configure
       run: |
         ./autogen.sh
@@ -29,6 +29,10 @@ jobs:
     - name: check
       run: |
         make check
+    - name: logs
+      run: |
+        for f in tests/*.log; do echo "=== $f ==="; cat "$f"; echo; done
+      if: ${{ failure() }}
   ubuntu_clang_glibc_dynamic:
     name: Tests on ubuntu (clang / glibc / dynamic)
     runs-on: ubuntu-20.04
@@ -41,7 +45,7 @@ jobs:
         sudo apt-get update;
         sudo apt-get install -y autoconf automake make
         sudo apt-get install -y clang
-        sudo apt-get install -y util-linux iproute2 socat file valgrind
+        sudo apt-get install -y util-linux iproute2 socat file valgrind python3-pip python3-venv
     - name: configure
       run: |
         ./autogen.sh
@@ -52,6 +56,10 @@ jobs:
     - name: check
       run: |
         make check
+    - name: logs
+      run: |
+        for f in tests/*.log; do echo "=== $f ==="; cat "$f"; echo; done
+      if: ${{ failure() }}
   ubuntu_gcc_glibc_static:
     name: Tests on ubuntu (gcc / glibc / static)
     runs-on: ubuntu-20.04
@@ -75,6 +83,10 @@ jobs:
     - name: check
       run: |
         make check
+    - name: logs
+      run: |
+        for f in tests/*.log; do echo "=== $f ==="; cat "$f"; echo; done
+      if: ${{ failure() }}
   ubuntu_gcc_musl_static:
     name: Tests on ubuntu (musl-gcc / musl / static)
     runs-on: ubuntu-20.04
@@ -98,3 +110,7 @@ jobs:
     - name: check
       run: |
         make check
+    - name: logs
+      run: |
+        for f in tests/*.log; do echo "=== $f ==="; cat "$f"; echo; done
+      if: ${{ failure() }}

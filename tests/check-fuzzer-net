@@ -1,0 +1,60 @@
+#!/bin/sh -efu
+
+if file "$top_builddir/src/syslogd/syslogd" | grep -qs 'statically linked'; then
+	exit 77
+fi
+
+name="${0##*/check-}"
+WORKDIR="$builddir/_build/$name"
+
+if [ ! -d "$WORKDIR/boofuzz" ]; then
+	mkdir -p -- "$WORKDIR/boofuzz"
+	python3 -m venv "$WORKDIR/boofuzz/env"
+	. "$WORKDIR/boofuzz/env/bin/activate"
+	pip install -U pip setuptools
+	pip install boofuzz
+fi
+
+if [ -z "${UNSHARE-}" ]; then
+	export UNSHARE=1
+	exec unshare --pid --net --user --uts --fork --map-root-user --mount-proc "$0"
+fi
+
+. "$srcdir/common.sh"
+
+ip addr add 127.0.0.1/8 label lo dev lo
+ip link set lo up
+
+prepare "$WORKDIR"
+
+{
+	printf 'log_format: %s\n' "%t %h %m"
+	for n in $facilities; do
+		rm -f -- "$WORKDIR/output/syslog-$n.log"
+		printf '%s.*\t%s\n' "$n" "$WORKDIR/output/syslog-$n.log"
+	done
+	printf '*.info\t%s\n' "$WORKDIR/syslog-mark.log"
+} > "$WORKDIR/syslog.conf"
+
+set -- valgrind \
+	--tool=memcheck \
+	--error-exitcode=1 \
+	--undef-value-errors=yes \
+	--errors-for-leak-kinds=definite,possible,reachable \
+	--track-origins=yes \
+	--track-fds=yes \
+	--leak-check=full \
+	--leak-resolution=high \
+	--show-leak-kinds=definite,possible,reachable \
+	--log-file="$WORKDIR/valgrind.log"
+
+SYSLOGD_WRAPPER="$@" \
+run_syslogd '' -r -i 127.0.0.1
+
+. "$WORKDIR/boofuzz/env/bin/activate"
+"$srcdir/fuzz_syslog.py"
+
+wait_mark
+
+kill -QUIT "$SYSLOGD_PID"
+wait "$SYSLOGD_PID"
