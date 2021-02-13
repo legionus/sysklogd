@@ -72,8 +72,6 @@
 static const char *ConfFile = "/etc/syslog.conf";
 static const char *PidFile  = _PATH_VARRUN "syslogd.pid";
 
-static char **parts;
-
 static int verbose = 0;
 
 enum input_type {
@@ -311,8 +309,7 @@ size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
 char **crunch_list(char *list);
 void usage(void) SYSKLOGD_NORETURN();
 void untty(void);
-void printchopped(const struct sourceinfo *const, char *msg, size_t len, int fd);
-void printline(const struct sourceinfo *const, char *msg);
+void printline(const struct sourceinfo *const, char *msg, size_t len);
 void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const, int flags);
 void clear_record_fields(struct log_format *log_fmt)
     SYSKLOGD_NONNULL((1));
@@ -691,7 +688,7 @@ void event_dispatch(void)
 			if (p->type == INPUT_UNIX) {
 				memset(line, 0, sizeof(line));
 
-				msglen = recv_withcred(p->fd, line, MAXLINE - 2, &sinfo);
+				msglen = recv_withcred(p->fd, line, sizeof(line) - 1, &sinfo);
 
 				if (verbose)
 					warnx("message from UNIX socket: #%d", p->fd);
@@ -700,7 +697,10 @@ void event_dispatch(void)
 					logerror("error - credentials not provided");
 
 				if (msglen > 0) {
-					printchopped(&sinfo, line, msglen + 2, p->fd);
+					if (verbose)
+						warnx("message length: %lu, File descriptor: %d.", msglen, p->fd);
+
+					printline(&sinfo, line, msglen);
 				} else if (msglen < 0 && errno != EINTR) {
 					logerror("recvfrom UNIX socket: %m");
 				}
@@ -716,7 +716,7 @@ void event_dispatch(void)
 
 				memset(line, 0, sizeof(line));
 
-				msglen = recvfrom(p->fd, line, MAXLINE - 2, 0,
+				msglen = recvfrom(p->fd, line, sizeof(line) - 1, 0,
 				                  (struct sockaddr *) &frominet, &len);
 				if (verbose) {
 					const char *addr = cvtaddr(&frominet, len);
@@ -728,7 +728,11 @@ void event_dispatch(void)
 					/* Note that if cvthname() returns NULL then
 					   we shouldn't attempt to log the line -- jch */
 					sinfo.hostname = (char *) cvthname(&frominet, len);
-					printchopped(&sinfo, line, msglen + 2, p->fd);
+
+					if (verbose)
+						warnx("message length: %lu, File descriptor: %d.", msglen, p->fd);
+
+					printline(&sinfo, line, msglen);
 				} else if (msglen < 0 && errno != EINTR && errno != EAGAIN) {
 					logerror("recvfrom INET socket: %m");
 					/* should be harmless now that we set
@@ -972,23 +976,6 @@ int main(int argc, char **argv)
 	sigfillset(&signal_mask);
 	sigprocmask(SIG_SETMASK, &signal_mask, NULL);
 
-	/* Create a partial message table for all file descriptors. */
-	num_fds = getdtablesize();
-
-	if (verbose)
-		warnx("allocated parts table for %d file descriptors.", num_fds);
-
-	if (!(parts = malloc(num_fds * sizeof(char *)))) {
-		logerror("cannot allocate memory for message parts table.");
-
-		if (getpid() != ppid)
-			kill(ppid, SIGTERM);
-
-		die(0);
-	}
-	for (i = 0; i < num_fds; ++i)
-		parts[i] = NULL;
-
 	if (verbose)
 		warnx("starting.");
 
@@ -1072,96 +1059,21 @@ void untty(void)
 }
 
 /*
- * Parse the line to make sure that the msg is not a composite of more
- * than one message.
- */
-
-void printchopped(const struct sourceinfo *const source, char *msg, size_t len, int fd)
-{
-	auto size_t ptlngth;
-
-	auto char *start = msg,
-	          *p,
-	          *end,
-	          tmpline[MAXLINE + 1];
-
-	if (verbose)
-		warnx("message length: %lu, File descriptor: %d.", len, fd);
-
-	tmpline[0] = '\0';
-	if (parts[fd] != NULL) {
-		if (verbose)
-			warnx("including part from messages.");
-
-		safe_strncpy(tmpline, parts[fd], sizeof(tmpline));
-		free(parts[fd]);
-		parts[fd] = NULL;
-		if ((strlen(msg) + strlen(tmpline)) > MAXLINE) {
-			logerror("cannot glue message parts together");
-			printline(source, tmpline);
-			start = msg;
-		} else {
-			if (verbose) {
-				warnx("previous: %s", tmpline);
-				warnx("next: %s", msg);
-			}
-
-			safe_strncat(tmpline, msg, sizeof(tmpline)); /* length checked above */
-
-			printline(source, tmpline);
-
-			if ((strlen(msg) + 1) == len)
-				return;
-
-			start = strchr(msg, '\0') + 1;
-		}
-	}
-
-	if (msg[len - 1] != '\0') {
-		msg[len] = '\0';
-
-		for (p = msg + len - 1; *p != '\0' && p > msg;)
-			--p;
-		if (*p == '\0')
-			p++;
-
-		ptlngth = strlen(p);
-
-		if ((parts[fd] = malloc(ptlngth + 1)) == NULL) {
-			logerror("cannot allocate memory for message part.");
-		} else {
-			safe_strncpy(parts[fd], p, ptlngth + 1);
-			if (verbose)
-				warnx("saving partial msg: %s", parts[fd]);
-			memset(p, '\0', ptlngth);
-		}
-	}
-
-	do {
-		end = strchr(start + 1, '\0');
-		printline(source, start);
-		start = end + 1;
-	} while (*start != '\0');
-}
-
-/*
  * Take a raw input line, decode the message, and print the message
  * on the appropriate log files.
  */
 
-void printline(const struct sourceinfo *const source, char *msg)
+void printline(const struct sourceinfo *const source, char *msg, size_t msglen)
 {
 	register char *p, *q;
 	register char c;
 	char line[MAXLINE + 1];
 	unsigned int pri; // Valid Priority values are 0-191
 	int prilen = 0;   // Track Priority value string len
-	size_t msglen;
 
 	/* test for special codes */
-	msglen = strlen(msg);
-	pri    = DEFUPRI;
-	p      = msg;
+	pri = DEFUPRI;
+	p   = msg;
 
 	if (*p == '<') {
 		pri = 0;
@@ -2038,7 +1950,6 @@ void die(int sig)
 	free_inputs();
 	free_log_format(&log_fmt);
 	free_log_format(&remote_fmt);
-	free(parts);
 
 	remove_pid(PidFile);
 
