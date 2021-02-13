@@ -18,6 +18,7 @@
 #define MAXLINE    1024 /* maximum line length */
 #define DEFUPRI    (LOG_USER | LOG_NOTICE)
 #define TIMERINTVL 30 /* interval for checking flush, mark */
+#define TAGLEN     32 + 10 /* rfc3164 tag+brackets+pid+colon+space+0 */
 
 #include "config.h"
 
@@ -162,6 +163,8 @@ struct filed {
 		} f_forw; /* forwarding address */
 		char f_fname[MAXFNAME];
 	} f_un;
+	char f_tag[TAGLEN];
+	size_t f_taglen;                     /* length of f_tag */
 	char f_prevline[MAXLINE];            /* last message logged */
 	time_t f_lasttime;                   /* time of last occurrence */
 	char f_prevhost[MAXHOSTNAMELEN + 1]; /* host from which recd. */
@@ -305,6 +308,7 @@ static char *chroot_dir  = NULL; /* user name to run server as */
 int main(int argc, char **argv);
 size_t safe_strncpy(char *dest, const char *src, size_t size) SYSKLOGD_NONNULL((1, 2));
 size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
+char *strnchr(const char *s, char c, size_t n) SYSKLOGD_NONNULL((1));
 char **crunch_list(char *list);
 void usage(void) SYSKLOGD_NORETURN();
 void untty(void);
@@ -315,8 +319,7 @@ void clear_record_fields(struct log_format *log_fmt)
 void set_record_field(struct log_format *log_fmt, enum log_format_type name,
                       const char *value, ssize_t len)
     SYSKLOGD_NONNULL((1));
-void fprintlog(register struct filed *f, const struct sourceinfo *const source,
-               int flags, const char *msg);
+void fprintlog(register struct filed *f, const struct sourceinfo *const source, int flags) SYSKLOGD_NONNULL((1, 2));
 void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo *const from)
     SYSKLOGD_NONNULL((1, 2, 3));
 void log_users(struct filed *f, struct log_format *fmt)
@@ -380,6 +383,14 @@ size_t safe_strncat(char *d, const char *s, size_t n)
 	if (l == n)
 		return l + strlen(s);
 	return l + safe_strncpy(d + l, s, n - l);
+}
+
+char *strnchr(const char *s, char c, size_t n)
+{
+	for (size_t i = 0; i < n && *s != '\0'; i++, s++)
+		if (*s == c)
+			return (char *) s;
+	return NULL;
 }
 
 int set_input(enum input_type type, const char *name, int fd)
@@ -1137,7 +1148,10 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 	struct filed *f;
 	int fac, prilev;
 	size_t msglen;
-	char newmsg[MAXLINE + 1];
+	char tag[TAGLEN];
+	size_t taglen = 0;
+
+	tag[0] = 0;
 
 	if (verbose)
 		warnx("printmsg: %s, flags %x, from %s, msg %s", textpri(pri), flags, from->hostname, msg);
@@ -1176,26 +1190,17 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 	 * to have space in the name).
 	 */
 	if (from->flags & SINFO_HAVECRED) { /* XXX: should log error on no creds? */
-		char tag[32 + 10];          /* rfc3164 tag+brackets+pid+colon+space+0 */
-		char *p;
-		char *oldpid;
+		char *p, *oldpid;
 
-		newmsg[0] = '\0';
+		p = strnchr(msg, ':', TAGLEN);
 
-		tag[0] = '\0';
-		safe_strncat(tag, msg, sizeof(tag));
-
-		p = strchr(tag, ':');
-		if (!(oldpid = strchr(tag, '[')) || (p && p < oldpid)) {
+		if (!(oldpid = strnchr(msg, '[', TAGLEN)) || (p && p < oldpid)) {
 			/* We do not have valid pid in tag, skip to tag end */
-			if (p || (p = strchr(tag, ' '))) {
-				*p = '\0';
-				msg += (p + 1 - tag);
-				while (*msg == ' ')
-					msg++;
+			if (p || (p = strnchr(msg, ' ', TAGLEN))) {
 				/* ..and add one */
-				snprintf(newmsg, sizeof(newmsg),
-				         "%s[%u]: ", tag, from->pid);
+				taglen = snprintf(tag, sizeof(tag), "%.*s[%u]",
+						(int) (p - msg), msg, from->pid);
+				msg += (p + 1 - msg);
 			} else {
 				/* Yes, it is safe to call logerror() from this
 				   part of printmsg().  Complain about tag being
@@ -1205,47 +1210,61 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 				return;
 			}
 		} else {
+			pid_t msgpid;
+			char *ep = NULL;
+
 			/* As we have pid, validate it */
-			if ((p = strchr(tag, ']'))) {
-				*p = '\0';
-				msg += (p + 1 - tag);
-				if (*msg == ':')
-					msg++;
-				while (*msg == ' ')
-					msg++;
-			} else {
+			if (!(p = strnchr(msg, ']', TAGLEN))) {
 				logerror("credentials processing failed -- "
 				         "received malformed message");
 				return;
 			}
-			*oldpid++ = '\0';
-			/* XXX: We could use strtoul() here for full
-			   error checking. */
-			if ((pid_t) atoi(oldpid) != from->pid) {
+			oldpid++;
+
+			errno  = 0;
+			msgpid = strtoul(oldpid, &ep, 10);
+
+			if (errno == ERANGE || ep != p) {
+				logerror("credentials processing failed -- "
+				         "received malformed message");
+				msgpid = from->pid;
+			}
+
+			if (msgpid != from->pid) {
 				logerror("malformed or spoofed pid detected!");
-				snprintf(newmsg, sizeof(newmsg),
-				         "%s[%s!=%u]: ",
-				         tag, oldpid, from->pid);
-			} else
-				snprintf(newmsg, sizeof(newmsg),
-				         "%s[%u]: ", tag, from->pid);
+				taglen = snprintf(tag, sizeof(tag), "%.*s[%s!=%u]",
+						(int) (oldpid - 1 - msg), msg, oldpid, from->pid);
+			} else {
+				taglen = snprintf(tag, sizeof(tag), "%.*s[%u]",
+						(int) (oldpid - 1 - msg), msg, from->pid);
+			}
+
+			msg += (p + 1 - msg);
+			if (*msg == ':')
+				msg++;
 		}
+
+		while (*msg == ' ')
+			msg++;
+
 		/* We may place group membership check here */
-		/* XXX: Silent truncation is possible */
-		safe_strncat(newmsg, msg, sizeof(newmsg) - strlen(newmsg));
-		msg    = newmsg;
-		msglen = strlen(msg);
 	}
 
 	/* log the message to the particular outputs */
 	if (!files) {
 		f = &consfile;
 
+		f->f_prevlen = msglen;
+		safe_strncpy(f->f_prevline, msg, sizeof(f->f_prevline));
+
+		f->f_taglen = taglen;
+		safe_strncpy(f->f_tag, tag, sizeof(f->f_tag));
+
 		f->f_file = open(f->f_un.f_fname, O_WRONLY | O_NOCTTY);
 
 		if (f->f_file >= 0) {
 			untty();
-			fprintlog(f, from, flags, msg);
+			fprintlog(f, from, flags);
 			close(f->f_file);
 			f->f_file = -1;
 		}
@@ -1268,7 +1287,10 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 		/*
 		 * suppress duplicate lines to this file
 		 */
-		if ((options & OPT_COMPRESS) && (flags & MARK) == 0 && msglen == f->f_prevlen &&
+		if ((options & OPT_COMPRESS) && (flags & MARK) == 0 &&
+		    msglen == f->f_prevlen &&
+		    taglen == f->f_taglen &&
+		    !strcmp(tag, f->f_tag) &&
 		    !strcmp(msg, f->f_prevline) &&
 		    !strcmp(from->hostname, f->f_prevhost)) {
 			f->f_lasttime = now;
@@ -1289,13 +1311,13 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 			 * in the future.
 			 */
 			if (now > REPEATTIME(f)) {
-				fprintlog(f, from, flags, NULL);
+				fprintlog(f, from, flags);
 				BACKOFF(f);
 			}
 		} else {
 			/* new line, save it */
 			if (f->f_prevcount) {
-				fprintlog(f, from, 0, NULL);
+				fprintlog(f, from, 0);
 				DupesPending--;
 			}
 
@@ -1308,7 +1330,10 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 			f->f_prevlen = msglen;
 			safe_strncpy(f->f_prevline, msg, sizeof(f->f_prevline));
 
-			fprintlog(f, from, flags, NULL);
+			f->f_taglen = taglen;
+			safe_strncpy(f->f_tag, tag, sizeof(f->f_tag));
+
+			fprintlog(f, from, flags);
 		}
 	}
 }
@@ -1600,10 +1625,10 @@ void log_users(struct filed *f, struct log_format *fmt)
 	wallmsg(f, fmt);
 }
 
-void fprintlog(struct filed *f, const struct sourceinfo *const from,
-               int flags, const char *msg)
+void fprintlog(struct filed *f, const struct sourceinfo *const from, int flags)
 {
-	char s_uid[20], s_gid[20], s_pid[20], s_pri[20], f_lasttime[26];
+	char s_uid[20], s_gid[20], s_pid[20], s_pri[20], f_lasttime[26], msg[MAXLINE + 1];
+	msg[0] = 0;
 
 	clear_record_fields(&log_fmt);
 
@@ -1631,16 +1656,16 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from,
 	snprintf(s_pri, sizeof(s_pri), "%d", f->f_prevpri);
 	set_record_field(&log_fmt, LOG_FORMAT_PRI, s_pri, -1);
 
-	if (msg) {
-		set_record_field(&log_fmt, LOG_FORMAT_MSG, msg, -1);
-	} else if (f->f_prevcount > 1) {
-		char repbuf[80];
-		snprintf(repbuf, sizeof(repbuf), "last message repeated %d times",
-		         f->f_prevcount);
-		set_record_field(&log_fmt, LOG_FORMAT_MSG, repbuf, -1);
+	if (!f->f_prevcount) {
+		if (f->f_taglen > 0) {
+			safe_strncat(msg, f->f_tag, sizeof(msg));
+			safe_strncat(msg, ": ", sizeof(msg));
+		}
+		safe_strncat(msg, f->f_prevline, sizeof(msg));
 	} else {
-		set_record_field(&log_fmt, LOG_FORMAT_MSG, f->f_prevline, f->f_prevlen);
+		snprintf(msg, sizeof(msg), "last message repeated %d times", f->f_prevcount);
 	}
+	set_record_field(&log_fmt, LOG_FORMAT_MSG, msg, -1);
 
 	switch (f->f_type) {
 		case F_UNUSED:
@@ -1877,7 +1902,7 @@ void flush_dups(void)
 				warnx("flush %s: repeated %d times, %ld sec.",
 				      TypeNames[f->f_type], f->f_prevcount,
 				      repeatinterval[f->f_repeatcount]);
-			fprintlog(f, &source, 0, NULL);
+			fprintlog(f, &source, 0);
 			BACKOFF(f);
 			DupesPending--;
 		}
@@ -2739,7 +2764,7 @@ void free_files(void)
 	while (f) {
 		/* flush any pending output */
 		if (f->f_prevcount)
-			fprintlog(f, &source, 0, NULL);
+			fprintlog(f, &source, 0);
 
 		switch (f->f_type) {
 			case F_FILE:
