@@ -16,7 +16,6 @@
  */
 
 #define MAXLINE    1024 /* maximum line length */
-#define MAXSVLINE  240  /* maximum saved line length */
 #define DEFUPRI    (LOG_USER | LOG_NOTICE)
 #define TIMERINTVL 30 /* interval for checking flush, mark */
 
@@ -163,7 +162,7 @@ struct filed {
 		} f_forw; /* forwarding address */
 		char f_fname[MAXFNAME];
 	} f_un;
-	char f_prevline[MAXSVLINE];          /* last message logged */
+	char f_prevline[MAXLINE];            /* last message logged */
 	time_t f_lasttime;                   /* time of last occurrence */
 	char f_prevhost[MAXHOSTNAMELEN + 1]; /* host from which recd. */
 	unsigned int f_prevpri;              /* pri of f_prevline */
@@ -1306,15 +1305,10 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 
 			safe_strncpy(f->f_prevhost, from->hostname, sizeof(f->f_prevhost));
 
-			if (msglen < MAXSVLINE) {
-				f->f_prevlen = msglen;
-				safe_strncpy(f->f_prevline, msg, sizeof(f->f_prevline));
-				fprintlog(f, from, flags, NULL);
-			} else {
-				f->f_prevline[0] = 0;
-				f->f_prevlen     = 0;
-				fprintlog(f, from, flags, msg);
-			}
+			f->f_prevlen = msglen;
+			safe_strncpy(f->f_prevline, msg, sizeof(f->f_prevline));
+
+			fprintlog(f, from, flags, NULL);
 		}
 	}
 }
