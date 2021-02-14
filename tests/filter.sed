@@ -8,6 +8,7 @@ s/^(May 1) [0-9]{2}:[0-9]{2}:[0-9]{2} /\1 12:34:56 /
 # Pid
 s/^(May 1 12:34:56 example root)\[[[:digit:]]+\]: /\1[123]: /
 s/^(May 1 12:34:56 localhost root)\[[[:digit:]]+\]: /\1[456]: /
+s/^(May 1 12:34:56 example root)\[[[:digit:]]+\!=[[:digit:]]+\]: /\1[123!=456]: /
 
 # Syslog version
 s/^(May 1 12:34:56 example syslogd) [0-9]+.[0-9]+.[0-9]+: (restart.*\.)/\1 1.6.0: \2/

@@ -35,7 +35,7 @@ run_syslogd -backend -r -i 127.0.0.2
 
 for f in $facilities; do
 	for p in $priorities; do
-		logger \
+		logger -i \
 			--socket "$WORKDIR/log" \
 			--socket-errors=on \
 			-p "$f.$p" "TEST $f.$p"

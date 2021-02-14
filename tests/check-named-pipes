@@ -28,7 +28,7 @@ run_syslogd
 
 for f in $facilities; do
 	for p in $priorities; do
-		logger \
+		logger -i \
 			--socket "$WORKDIR/log" \
 			--socket-errors=on \
 			-p "$f.$p" "TEST $f.$p"

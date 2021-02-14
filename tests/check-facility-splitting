@@ -25,7 +25,7 @@ prepare "$WORKDIR"
 run_syslogd
 
 for n in $facilities; do
-	logger --socket "$WORKDIR/log" -p "$n.info" "TEST $n"
+	logger -i --socket "$WORKDIR/log" -p "$n.info" "TEST $n"
 done
 
 wait_mark
