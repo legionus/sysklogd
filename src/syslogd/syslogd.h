@@ -54,7 +54,41 @@ struct globals {
 	const char *funix_dir;
 };
 
+enum log_format_type {
+	LOG_FORMAT_NONE = 0,
+	LOG_FORMAT_BOL,
+	LOG_FORMAT_HASH,
+	LOG_FORMAT_TIME,
+	LOG_FORMAT_HOST,
+	LOG_FORMAT_PID,
+	LOG_FORMAT_UID,
+	LOG_FORMAT_GID,
+	LOG_FORMAT_PRI,
+	LOG_FORMAT_TAG,
+	LOG_FORMAT_CONTENT,
+	LOG_FORMAT_MSG,
+	LOG_FORMAT_EOL,
+	LOG_FORMAT_COUNTS,
+};
+
+struct log_format {
+	char *line;
+
+	enum log_format_type *type; /* list of iov element types */
+	struct iovec *iov;          /* log format parts and placeholders for message parts */
+	size_t iov_nr;              /* number of elements in type and iov lists */
+
+	unsigned int mask;
+
+	struct iovec values[LOG_FORMAT_COUNTS];
+};
+
 extern int set_input(enum input_type type, const char *name, int fd);
 extern void parse_arguments(int argc, char **argv, struct globals *g);
+
+extern void logerror(const char *fmt, ...) SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
+
+extern int parse_log_format(struct log_format *log_fmt, const char *s);
+extern void free_log_format(struct log_format *fmt);
 
 #endif /* _SYSLOGD_H_ */

@@ -3,6 +3,7 @@ syslogd_CFLAGS  = -I$(srcdir)/.. -D_GNU_SOURCE
 syslogd_SOURCES = $(srcdir)/syslogd.c \
 		  $(srcdir)/syslogd.h \
 		  $(srcdir)/arguments.c \
+		  $(srcdir)/log-format.c \
 		  $(srcdir)/sha256.c \
 		  $(srcdir)/sha256.h \
 		  $(srcdir)/bswap.h \

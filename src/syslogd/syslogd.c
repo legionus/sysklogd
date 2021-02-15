@@ -233,39 +233,8 @@ struct sourceinfo {
 	unsigned int flags;
 };
 
-enum log_format_type {
-	LOG_FORMAT_NONE = 0,
-	LOG_FORMAT_BOL,
-	LOG_FORMAT_HASH,
-	LOG_FORMAT_TIME,
-	LOG_FORMAT_HOST,
-	LOG_FORMAT_PID,
-	LOG_FORMAT_UID,
-	LOG_FORMAT_GID,
-	LOG_FORMAT_PRI,
-	LOG_FORMAT_TAG,
-	LOG_FORMAT_CONTENT,
-	LOG_FORMAT_MSG,
-	LOG_FORMAT_EOL,
-	LOG_FORMAT_COUNTS,
-};
-
-struct log_format {
-	char *line;
-
-	enum log_format_type *type; /* list of iov element types */
-	struct iovec *iov;          /* log format parts and placeholders for message parts */
-	size_t iov_nr;              /* number of elements in type and iov lists */
-
-	unsigned int mask;
-
-	struct iovec values[LOG_FORMAT_COUNTS];
-};
-
 static struct log_format log_fmt    = { 0 };
 static struct log_format remote_fmt = { 0 };
-
-static ssize_t iovec_max = 0;
 
 static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
@@ -301,7 +270,6 @@ const char *cvthname(struct sockaddr_storage *f, unsigned int len);
 void flush_dups(void);
 void flush_mark(void);
 void debug_switch(int);
-void logerror(const char *fmt, ...) SYSKLOGD_FORMAT((__printf__, 1, 2)) SYSKLOGD_NONNULL((1));
 void die(int sig) SYSKLOGD_NORETURN();
 void doexit(int sig) SYSKLOGD_NORETURN();
 void init(void);
@@ -311,9 +279,6 @@ int parse_config_file(const char *filename) SYSKLOGD_NONNULL((1));
 int decode(const char *name, const CODE *codetab) SYSKLOGD_NONNULL((1, 2));
 const char *print_code_name(int val, const CODE *codetab) SYSKLOGD_NONNULL((2)) SYSKLOGD_PURE();
 struct filed *allocate_log(void);
-int set_log_format_field(struct log_format *log_fmt, enum log_format_type t, const char *s, size_t n) SYSKLOGD_NONNULL((1));
-int parse_log_format(struct log_format *log_fmt, const char *s);
-void free_log_format(struct log_format *fmt);
 void calculate_digest(struct filed *f, struct log_format *log_fmt);
 int set_nonblock_flag(int desc);
 int create_unix_socket(const char *path, enum unixaf_option opt) SYSKLOGD_NONNULL((1));
@@ -2371,202 +2336,6 @@ struct filed *allocate_log(void)
 	files     = new;
 
 	return files;
-}
-
-int set_log_format_field(struct log_format *fmt, enum log_format_type t, const char *s, size_t n)
-{
-	struct iovec *iov;
-	enum log_format_type *type;
-
-	if (fmt->iov_nr >= (size_t) iovec_max) {
-		logerror("Too many parts in the log_format string");
-		return -1;
-	}
-
-	iov = realloc(fmt->iov, sizeof(*iov) * (fmt->iov_nr + 1));
-	if (!iov) {
-		logerror("Cannot allocate record for log_format string");
-		return -1;
-	}
-	fmt->iov = iov;
-
-	fmt->iov[fmt->iov_nr].iov_base = (char *) s;
-	fmt->iov[fmt->iov_nr].iov_len  = n;
-
-	type = realloc(fmt->type, sizeof(*type) * (fmt->iov_nr + 1));
-	if (!type) {
-		logerror("Cannot allocate field for log_format string");
-		return -1;
-	}
-
-	fmt->type = type;
-	fmt->type[fmt->iov_nr] = t;
-	fmt->mask |= (1U << t);
-
-	fmt->iov_nr++;
-
-	return 0;
-}
-
-int parse_log_format(struct log_format *fmt, const char *str)
-{
-	const char *ptr, *start;
-	int i, special;
-	struct log_format new_fmt = { 0 };
-
-	iovec_max = sysconf(_SC_IOV_MAX);
-	if (iovec_max < 0) {
-		logerror("unable to get maximum number of `iovec' structures that one process");
-		iovec_max = 1024;
-	}
-
-	new_fmt.line = strdup(str);
-	if (!new_fmt.line) {
-		logerror("Cannot allocate log_format string");
-		goto error;
-	}
-
-	ptr = str;
-	i = special = 0;
-
-	while (*ptr != '\0') {
-		char c = *ptr++;
-
-		switch (c) {
-			case 'b':
-				if (special) c = '\b';
-				break;
-			case 'f':
-				if (special) c = '\f';
-				break;
-			case 'n':
-				if (special) c = '\n';
-				break;
-			case 'r':
-				if (special) c = '\r';
-				break;
-			case 't':
-				if (special) c = '\t';
-				break;
-			case '\\':
-				if (!special) {
-					special = 1;
-					continue;
-				}
-				break;
-		}
-		new_fmt.line[i++] = c;
-		special           = 0;
-	}
-
-	special = 0;
-
-	if (set_log_format_field(&new_fmt, LOG_FORMAT_BOL, NULL, 0) < 0)
-		goto error;
-
-	start = ptr = new_fmt.line;
-
-	while (*ptr != '\0') {
-		enum log_format_type f_type;
-
-		if (special) {
-			switch (*ptr) {
-				case 't':
-					f_type = LOG_FORMAT_TIME;
-					break;
-				case 'h':
-					f_type = LOG_FORMAT_HOST;
-					break;
-				case 'm':
-					f_type = LOG_FORMAT_MSG;
-					break;
-				case 'u':
-					f_type = LOG_FORMAT_UID;
-					break;
-				case 'g':
-					f_type = LOG_FORMAT_GID;
-					break;
-				case 'p':
-					f_type = LOG_FORMAT_PID;
-					break;
-				case 'P':
-					f_type = LOG_FORMAT_PRI;
-					break;
-				case 'H':
-					f_type = LOG_FORMAT_HASH;
-					break;
-				case 'T':
-					f_type = LOG_FORMAT_TAG;
-					break;
-				case 'C':
-					f_type = LOG_FORMAT_CONTENT;
-					break;
-				case '%':
-					special = 0;
-					goto create_special;
-				default:
-					logerror("unexpected special: '%%%c'", *ptr);
-					goto error;
-			}
-			special = 0;
-			goto create_field;
-
-		} else if (*ptr == '%')
-			special = 1;
-	next:
-		ptr++;
-		continue;
-	create_field:
-		if ((ptr - start - 1) > 0 &&
-		    set_log_format_field(&new_fmt, LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
-			goto error;
-
-		if (set_log_format_field(&new_fmt, f_type, NULL, 0) < 0)
-			goto error;
-
-		start = ptr + 1;
-		goto next;
-	create_special:
-		if (set_log_format_field(&new_fmt, LOG_FORMAT_NONE, start, (size_t)(ptr - start - 1)) < 0)
-			goto error;
-
-		start = ptr;
-		goto next;
-	}
-
-	if (special) {
-		logerror("unexpected '%%' at the end of line");
-		goto error;
-	}
-
-	if (start != ptr &&
-	    set_log_format_field(&new_fmt, LOG_FORMAT_NONE, start, (size_t)(ptr - start)) < 0)
-		goto error;
-
-	if (set_log_format_field(&new_fmt, LOG_FORMAT_EOL, NULL, 0) < 0)
-		goto error;
-
-	free(fmt->line);
-	free(fmt->iov);
-	free(fmt->type);
-
-	fmt->line   = new_fmt.line;
-	fmt->iov    = new_fmt.iov;
-	fmt->iov_nr = new_fmt.iov_nr;
-	fmt->type   = new_fmt.type;
-
-	return 0;
-error:
-	free_log_format(&new_fmt);
-
-	return -1;
-}
-
-void free_log_format(struct log_format *fmt)
-{
-	free(fmt->line);
-	free(fmt->iov);
-	free(fmt->type);
 }
 
 void free_inputs(void)
