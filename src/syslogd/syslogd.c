@@ -252,6 +252,8 @@ enum log_format_type {
 	LOG_FORMAT_UID,
 	LOG_FORMAT_GID,
 	LOG_FORMAT_PRI,
+	LOG_FORMAT_TAG,
+	LOG_FORMAT_CONTENT,
 	LOG_FORMAT_MSG,
 	LOG_FORMAT_EOL,
 	LOG_FORMAT_COUNTS,
@@ -1643,6 +1645,8 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from, int flags)
 	set_record_field(&log_fmt, LOG_FORMAT_TIME, f_lasttime + 4, 15);
 	set_record_field(&log_fmt, LOG_FORMAT_HOST, f->f_prevhost, -1);
 	set_record_field(&log_fmt, LOG_FORMAT_HASH, f->f_prevhash, -1);
+	set_record_field(&log_fmt, LOG_FORMAT_TAG, f->f_tag, f->f_taglen);
+	set_record_field(&log_fmt, LOG_FORMAT_CONTENT, f->f_prevline, f->f_prevlen);
 
 	snprintf(s_uid, sizeof(s_uid), "%d", from->uid);
 	set_record_field(&log_fmt, LOG_FORMAT_UID, s_uid, -1);
@@ -2668,6 +2672,12 @@ int parse_log_format(struct log_format *fmt, const char *str)
 					break;
 				case 'H':
 					f_type = LOG_FORMAT_HASH;
+					break;
+				case 'T':
+					f_type = LOG_FORMAT_TAG;
+					break;
+				case 'C':
+					f_type = LOG_FORMAT_CONTENT;
 					break;
 				case '%':
 					special = 0;
