@@ -47,6 +47,99 @@ original BSD syslogd.
 One rule may be divided
 into several lines if the leading line is terminated with an backslash
 (``\\'').
+
+.SS Directives
+The
+.BR log_format
+is a directive to define the format of the logged messages. By default, the
+message format is:
+.PP
+.in +4n
+.EX
+log_format: %t %h %m
+.EE
+.in
+.PP
+.SS Format of the format string
+The format string is a character string. The format string is composed of zero
+or more directives: ordinary characters (not
+.BR % ),
+which are copied unchanged to
+the output stream; and conversion specifications, each of which results in
+fetching the entire message or parts of it. Each conversion specification is
+introduced by the character
+.BR % ,
+and ends with a
+.IR specifier .
+
+.SS Specifiers
+The specifiers and their meanings are:
+.TP
+\e\e
+backslash character.
+.TP
+\eb
+backspace character,
+.TP
+\ef
+form feed character.
+.TP
+\en
+new line character.
+.TP
+\er
+carriage return character.
+.TP
+\et
+horizontal tab character.
+.TP
+%%
+a single ``%'' character.
+.TP
+%t
+time of last occurrence.
+.TP
+%h
+host from which this message.
+.TP
+%T
+message tag if any.
+.TP
+%C
+message content.
+.TP
+%m
+message text. According to section 4.1.3 of RFC 3164, a message has two fields
+known as the
+.BR TAG
+field and the
+.BR CONTENT
+field. The value in the
+.BR TAG
+field will be the name of the program or process that generated the message. The
+.BR CONTENT
+contains the details of the message. Ths ``%m'' specifier is just a combination
+of two other specifiers: ``%T: %C''.
+.TP
+%u
+user who sent the message.
+.TP
+%g
+user group who sent the message.
+.TP
+%p
+PID of the process that sent the message.
+.TP
+%H
+hash of current message + hash of previous message. This hash is the address of
+this message and all others until the server starts. Each time the server
+starts, it starts creating a checksum chain for each log file. On restart, the
+chain starts with an empty checksum.
+.PP
+The
+.BR %u ", " %g ", and " %p
+specifiers are only meaningful if the message was received via a UNIX domain
+socket. In all other cases, their values will be zero.
 .SH SELECTORS
 The selector field consists of two parts, a
 .I facility
