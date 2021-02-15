@@ -66,20 +66,13 @@
 #include "pidfile.h"
 #include "attribute.h"
 #include "hash.h"
+#include "syslogd.h"
 
 #include <paths.h>
 
-static const char *ConfFile = "/etc/syslog.conf";
 static const char *PidFile  = _PATH_VARRUN "syslogd.pid";
 
-static int verbose = 0;
-
-enum input_type {
-	INPUT_NONE = 0,
-	INPUT_UNIX,
-	INPUT_INET,
-	INPUT_SIGNALFD,
-};
+static struct globals globals = { 0 };
 
 struct input {
 	enum input_type type;
@@ -196,8 +189,6 @@ static time_t repeatinterval[] = { 30, 60 }; /* # of secs before flush */
 #define INET_RETRY_MAX    10 /* maximum of retries for getaddrinfo() */
 #endif
 
-#define LIST_DELIMITER ':' /* delimiter between two hosts */
-
 static const char *TypeNames[] = {
 	"UNUSED", "FILE", "TTY", "CONSOLE",
 	"FORW", "USERS", "WALL", "FORW(SUSPENDED)",
@@ -276,43 +267,18 @@ static struct log_format remote_fmt = { 0 };
 
 static ssize_t iovec_max = 0;
 
-enum option_flag {
-	OPT_SEND_TO_ALL   = (1 << 0), /* send message to all IPv4/IPv6 addresses */
-	OPT_FORK          = (1 << 1), /* don't fork - don't run in daemon mode */
-	OPT_COMPRESS      = (1 << 2), /* compress repeated messages flag */
-	OPT_NET_HOPS      = (1 << 3), /* can we bounce syslog messages through an
-	                               * intermediate host. */
-	OPT_ACCEPT_REMOTE = (1 << 4), /* receive messages that come via UDP */
-};
-
-static unsigned options = 0;
-
 static char LocalHostName[MAXHOSTNAMELEN + 1]; /* our hostname */
 static const char *LocalDomain;                /* our local domain name */
 static const char *emptystring   = "";
 static int InetInuse             = 0;       /* non-zero if INET sockets are being used */
-static unsigned int MarkInterval = 20 * 60; /* interval between marks in seconds */
-#ifdef SYSLOG_INET6
-static int family = PF_UNSPEC; /* protocol family (IPv4, IPv6 or both) */
-#else
-static int family = PF_INET; /* protocol family (IPv4 only) */
-#endif
 static time_t now           = 0;
 static int DupesPending     = 0;    /* Number of unflushed duplicate messages */
-static char **StripDomains  = NULL; /* these domains may be stripped before writing logs */
-static char **LocalHosts    = NULL; /* these hosts are logged with their hostname */
-
-static char *bind_addr   = NULL; /* bind UDP port to this interface only */
-static char *server_user = NULL; /* user name to run server as */
-static char *chroot_dir  = NULL; /* user name to run server as */
 
 /* Function prototypes. */
 int main(int argc, char **argv);
 size_t safe_strncpy(char *dest, const char *src, size_t size) SYSKLOGD_NONNULL((1, 2));
 size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
 char *strnchr(const char *s, char c, size_t n) SYSKLOGD_NONNULL((1)) SYSKLOGD_PURE();
-char **crunch_list(char *list);
-void usage(void) SYSKLOGD_NORETURN();
 void untty(void);
 void printline(const struct sourceinfo *const, char *msg, size_t len);
 void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const, int flags);
@@ -356,7 +322,6 @@ int create_inet_sockets(void);
 int drop_root(void);
 void add_funix_dir(const char *dname) SYSKLOGD_NONNULL((1));
 void set_internal_sinfo(struct sourceinfo *source) SYSKLOGD_NONNULL((1));
-int set_input(enum input_type type, const char *name, int fd);
 void free_files(void);
 void free_inputs(void);
 void set_pmask(int i, int pri, int flags, struct filed *f) SYSKLOGD_NONNULL((4));
@@ -526,10 +491,10 @@ int create_inet_sockets(void)
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags    = AI_PASSIVE;
-	hints.ai_family   = family;
+	hints.ai_family   = globals.family;
 	hints.ai_socktype = SOCK_DGRAM;
 
-	error = getaddrinfo(bind_addr, "syslog", &hints, &res);
+	error = getaddrinfo(globals.bind_addr, "syslog", &hints, &res);
 	if (error) {
 		logerror("network logging disabled (syslog/udp service unknown or address incompatible).");
 		logerror("see syslogd(8) for details of whether and how to enable it.");
@@ -599,16 +564,16 @@ int drop_root(void)
 {
 	struct passwd *pw;
 
-	if (!(pw = getpwnam(server_user))) return -1;
+	if (!(pw = getpwnam(globals.server_user))) return -1;
 
 	if (!pw->pw_uid) return -1;
 
-	if (chroot_dir) {
-		if (chdir(chroot_dir)) return -1;
+	if (globals.chroot_dir) {
+		if (chdir(globals.chroot_dir)) return -1;
 		if (chroot(".")) return -1;
 	}
 
-	if (initgroups(server_user, pw->pw_gid)) return -1;
+	if (initgroups(globals.server_user, pw->pw_gid)) return -1;
 	if (setgid(pw->pw_gid)) return -1;
 	if (setuid(pw->pw_uid)) return -1;
 
@@ -688,7 +653,7 @@ void event_dispatch(void)
 			flush_dups();
 		}
 
-		if (MarkInterval > 0 && (now - last_flush_mark) >= MarkInterval) {
+		if (globals.mark_interval > 0 && (now - last_flush_mark) >= globals.mark_interval) {
 			last_flush_mark = now;
 			flush_mark();
 		}
@@ -702,14 +667,14 @@ void event_dispatch(void)
 
 				msglen = recv_withcred(p->fd, line, sizeof(line) - 1, &sinfo);
 
-				if (verbose)
+				if (globals.verbose)
 					warnx("message from UNIX socket: #%d", p->fd);
 
 				if (!(sinfo.flags & SINFO_HAVECRED))
 					logerror("error - credentials not provided");
 
 				if (msglen > 0) {
-					if (verbose)
+					if (globals.verbose)
 						warnx("message length: %lu, File descriptor: %d.", msglen, p->fd);
 
 					printline(&sinfo, line, msglen);
@@ -730,9 +695,9 @@ void event_dispatch(void)
 
 				msglen = recvfrom(p->fd, line, sizeof(line) - 1, 0,
 				                  (struct sockaddr *) &frominet, &len);
-				if (verbose) {
+				if (globals.verbose) {
 					const char *addr = cvtaddr(&frominet, len);
-					if (verbose)
+					if (globals.verbose)
 						warnx("message from inetd socket: host: %s", addr);
 				}
 
@@ -741,7 +706,7 @@ void event_dispatch(void)
 					   we shouldn't attempt to log the line -- jch */
 					sinfo.hostname = (char *) cvthname(&frominet, len);
 
-					if (verbose)
+					if (globals.verbose)
 						warnx("message length: %lu, File descriptor: %d.", msglen, p->fd);
 
 					printline(&sinfo, line, msglen);
@@ -763,7 +728,7 @@ void event_dispatch(void)
 					continue;
 				}
 
-				if (verbose)
+				if (globals.verbose)
 					warnx("received signal #%d (%s).",
 							fdsi.ssi_signo,
 							strsignal(fdsi.ssi_signo));
@@ -771,14 +736,14 @@ void event_dispatch(void)
 				switch (fdsi.ssi_signo) {
 					case SIGINT:
 					case SIGQUIT:
-						if (!(options & OPT_FORK))
+						if (!(globals.options & OPT_FORK))
 							die(fdsi.ssi_signo);
 						break;
 					case SIGTERM:
 						die(fdsi.ssi_signo);
 						break;
 					case SIGHUP:
-						if (verbose)
+						if (globals.verbose)
 							warnx("reloading syslogd.");
 						init();
 						break;
@@ -805,109 +770,21 @@ void event_dispatch(void)
 
 int main(int argc, char **argv)
 {
-	int num_fds, i, fd, ch;
+	int num_fds, i, fd;
 	pid_t ppid = getpid();
-
-	extern int optind;
-	extern char *optarg;
-	const char *funix_dir = "/etc/syslog.d";
-	const char *devlog    = _PATH_LOG;
 
 	if (chdir("/") < 0)
 		err(1, "chdir to / failed");
 
-	options |= OPT_COMPRESS | OPT_FORK;
+	parse_arguments(argc, argv, &globals);
 
-	while ((ch = getopt(argc, argv, "46Aa:cdhf:i:j:l:m:np:P:rs:u:v")) != EOF)
-		switch ((char) ch) {
-			case '4':
-				family = PF_INET;
-				break;
-#ifdef SYSLOG_INET6
-			case '6':
-				family = PF_INET6;
-				break;
-#endif
-			case 'A':
-				options |= OPT_SEND_TO_ALL;
-				break;
-			case 'a':
-				set_input(INPUT_UNIX, optarg, -1);
-				break;
-			case 'c': /* don't compress repeated messages */
-				options &= ~OPT_COMPRESS;
-				break;
-			case 'd': /* verbosity */
-				verbose++;
-				break;
-			case 'f': /* configuration file */
-				ConfFile = optarg;
-				break;
-			case 'h':
-				options |= OPT_NET_HOPS;
-				break;
-			case 'i':
-				if (bind_addr) {
-					warnx("only one -i argument allowed, "
-					      "the first one is taken.");
-					break;
-				}
-				bind_addr = optarg;
-				break;
-			case 'j':
-				chroot_dir = optarg;
-				break;
-			case 'l':
-				if (LocalHosts) {
-					warnx("only one -l argument allowed, "
-					      "the first one is taken.");
-					break;
-				}
-				LocalHosts = crunch_list(optarg);
-				break;
-			case 'm': /* mark interval */
-				MarkInterval = atoi(optarg) * 60;
-				break;
-			case 'n': /* don't fork */
-				options &= ~OPT_FORK;
-				break;
-			case 'p': /* path to regular log socket */
-				devlog = optarg;
-				break;
-			case 'P':
-				funix_dir = optarg;
-				break;
-			case 'r': /* accept remote messages */
-				options |= OPT_ACCEPT_REMOTE;
-				break;
-			case 's':
-				if (StripDomains) {
-					warnx("only one -s argument allowed,"
-					      "the first one is taken.");
-					break;
-				}
-				StripDomains = crunch_list(optarg);
-				break;
-			case 'u':
-				server_user = optarg;
-				break;
-			case 'v':
-				printf("syslogd %s\n", VERSION);
-				exit(0);
-			case '?':
-			default:
-				usage();
-		}
-	if ((argc -= optind))
-		usage();
-
-	if (chroot_dir && !server_user)
+	if (globals.chroot_dir && !globals.server_user)
 		errx(1, "'-j' is only valid with '-u'");
 
-	set_input(INPUT_UNIX, devlog, -1);
+	set_input(INPUT_UNIX, globals.devlog, -1);
 
-	if (funix_dir && *funix_dir)
-		add_funix_dir(funix_dir);
+	if (globals.funix_dir && *globals.funix_dir)
+		add_funix_dir(globals.funix_dir);
 
 	if (parse_log_format(&log_fmt, "%t %h (uid=%u) %m") < 0)
 		exit(1);
@@ -915,10 +792,10 @@ int main(int argc, char **argv)
 	if (parse_log_format(&remote_fmt, "<%P>%m") < 0)
 		exit(1);
 
-	if ((options & OPT_FORK)) {
+	if ((globals.options & OPT_FORK)) {
 		pid_t pid;
 
-		if (verbose)
+		if (globals.verbose)
 			warnx("checking pidfile.");
 
 		if (check_pid(PidFile))
@@ -954,19 +831,19 @@ int main(int argc, char **argv)
 			close(i);
 		untty();
 
-		if (verbose)
+		if (globals.verbose)
 			warnx("writing pidfile.");
 
 		if (!check_pid(PidFile)) {
 			if (!write_pid(PidFile)) {
-				if (verbose)
+				if (globals.verbose)
 					warnx("can't write pid.");
 				if (getpid() != ppid)
 					kill(ppid, SIGTERM);
 				exit(1);
 			}
 		} else {
-			if (verbose)
+			if (globals.verbose)
 				warnx("pidfile (and pid) already exist.");
 			if (getpid() != ppid)
 				kill(ppid, SIGTERM);
@@ -988,7 +865,7 @@ int main(int argc, char **argv)
 	sigfillset(&signal_mask);
 	sigprocmask(SIG_SETMASK, &signal_mask, NULL);
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("starting.");
 
 	init();
@@ -999,8 +876,8 @@ int main(int argc, char **argv)
 	if (getpid() != ppid)
 		kill(ppid, SIGTERM);
 
-	if (server_user && drop_root()) {
-		if (verbose)
+	if (globals.server_user && drop_root()) {
+		if (globals.verbose)
 			warnx("failed to drop root.");
 		exit(1);
 	}
@@ -1008,64 +885,9 @@ int main(int argc, char **argv)
 	event_dispatch();
 }
 
-void usage(void)
-{
-	fprintf(stderr, "usage: syslogd [-46Acdrvh] [-l hostlist] [-m markinterval] [-n] [-p path]\n"
-	                " [-s domainlist] [-f conffile] [-i IP address] [-u username]\n");
-	exit(1);
-}
-
-char **crunch_list(char *list)
-{
-	int i, m, n;
-	char *p, *q;
-	char **result = NULL;
-
-	p = list;
-
-	/* strip off trailing delimiters */
-	while (*p && p[strlen(p) - 1] == LIST_DELIMITER)
-		p[strlen(p) - 1] = '\0';
-	/* cut off leading delimiters */
-	while (p[0] == LIST_DELIMITER)
-		p++;
-
-	/* count delimiters to calculate the number of elements */
-	for (n = i = 0; p[i]; i++)
-		if (p[i] == LIST_DELIMITER) n++;
-
-	if (!(result = malloc(sizeof(char *) * (n + 2))))
-		errx(1, "can't get enough memory.");
-
-	/*
-	 * We now can assume that the first and last
-	 * characters are different from any delimiters,
-	 * so we don't have to care about this.
-	 */
-	m = 0;
-	while ((q = strchr(p, LIST_DELIMITER)) && m < n) {
-		result[m] = malloc((q - p + 1) * sizeof(char));
-		if (!result[m])
-			errx(1, "can't get enough memory.");
-
-		memcpy(result[m], p, q - p);
-		result[m][q - p] = '\0';
-
-		p = q;
-		p++;
-		m++;
-	}
-	if (!(result[m] = strdup(p)))
-		errx(1, "can't get enough memory.");
-
-	result[++m] = NULL;
-
-	return result;
-}
-
 void untty(void)
 {
-	if ((options & OPT_FORK)) {
+	if ((globals.options & OPT_FORK)) {
 		setsid();
 	}
 }
@@ -1155,7 +977,7 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 
 	tag[0] = 0;
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("printmsg: %s, flags %x, from %s, msg %s", textpri(pri), flags, from->hostname, msg);
 
 	/*
@@ -1283,13 +1105,13 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 			continue;
 
 		/* don't output marks to recently written files */
-		if ((flags & MARK) && (now - f->f_time) < MarkInterval / 2)
+		if ((flags & MARK) && (now - f->f_time) < globals.mark_interval / 2)
 			continue;
 
 		/*
 		 * suppress duplicate lines to this file
 		 */
-		if ((options & OPT_COMPRESS) && (flags & MARK) == 0 &&
+		if ((globals.options & OPT_COMPRESS) && (flags & MARK) == 0 &&
 		    msglen == f->f_prevlen &&
 		    taglen == f->f_taglen &&
 		    !strcmp(tag, f->f_tag) &&
@@ -1298,7 +1120,7 @@ void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const 
 			f->f_lasttime = now;
 			f->f_prevcount++;
 
-			if (verbose)
+			if (globals.verbose)
 				warnx("msg repeated %d times, %ld sec of %ld.",
 				      f->f_prevcount, now - f->f_time,
 				      repeatinterval[f->f_repeatcount]);
@@ -1410,20 +1232,20 @@ void log_remote(struct filed *f, struct log_format *fmt, const struct sourceinfo
 	struct addrinfo hints, *ai;
 	int err;
 again:
-	if (verbose)
+	if (globals.verbose)
 		warnx("log to remote server %s %s", TypeNames[f->f_type], f->f_un.f_forw.f_hname);
 
 	if (f->f_type == F_FORW_SUSP) {
 		fwd_suspend = time(NULL) - f->f_time;
 
 		if (fwd_suspend >= INET_SUSPEND_TIME) {
-			if (verbose)
+			if (globals.verbose)
 				warnx("forwarding suspension over, retrying FORW");
 			f->f_type = F_FORW;
 			goto again;
 		}
 
-		if (verbose)
+		if (globals.verbose)
 			warnx("forwarding suspension not over, time left: %ld.",
 			      INET_SUSPEND_TIME - fwd_suspend);
 		return;
@@ -1441,30 +1263,30 @@ again:
 		fwd_suspend = time(NULL) - f->f_time;
 
 		if (fwd_suspend >= INET_SUSPEND_TIME) {
-			if (verbose)
+			if (globals.verbose)
 				warnx("forwarding suspension to unknown over, retrying.");
 
 			memset(&hints, 0, sizeof(hints));
-			hints.ai_family   = family;
+			hints.ai_family   = globals.family;
 			hints.ai_socktype = SOCK_DGRAM;
 
 			if ((err = getaddrinfo(f->f_un.f_forw.f_hname, "syslog", &hints, &ai))) {
-				if (verbose) {
+				if (globals.verbose) {
 					warnx("failure: %s", gai_strerror(err));
 					warnx("retries: %d", f->f_prevcount);
 				}
 				if (--f->f_prevcount < 0) {
-					if (verbose)
+					if (globals.verbose)
 						warnx("giving up.");
 					f->f_type = F_UNUSED;
 				} else {
-					if (verbose)
+					if (globals.verbose)
 						warnx("left retries: %d", f->f_prevcount);
 				}
 				return;
 			}
 
-			if (verbose)
+			if (globals.verbose)
 				warnx("host %s found, resuming.", f->f_un.f_forw.f_hname);
 			f->f_un.f_forw.f_addr = ai;
 			f->f_prevcount        = 0;
@@ -1472,7 +1294,7 @@ again:
 			goto again;
 		}
 
-		if (verbose)
+		if (globals.verbose)
 			warnx("forwarding suspension not over, time left: %ld",
 			      INET_SUSPEND_TIME - fwd_suspend);
 		return;
@@ -1486,8 +1308,8 @@ again:
 	 * already comes from one. (we don't care 'bout who
 	 * sent the message, we don't send it anyway)  -Joey
 	 */
-	if (strcmp(from->hostname, LocalHostName) && !(options & OPT_NET_HOPS)) {
-		if (verbose)
+	if (strcmp(from->hostname, LocalHostName) && !(globals.options & OPT_NET_HOPS)) {
+		if (globals.verbose)
 			warnx("not sending message to remote.");
 		return;
 	}
@@ -1527,7 +1349,7 @@ again:
 			}
 			err = errno;
 		}
-		if (err == -1 && !(options & OPT_SEND_TO_ALL))
+		if (err == -1 && !(globals.options & OPT_SEND_TO_ALL))
 			break;
 	}
 
@@ -1546,7 +1368,7 @@ void log_locally(struct filed *f, struct log_format *fmt, int flags)
 		f->f_time = now;
 
 		if (flags & IGN_CONS) {
-			if (verbose)
+			if (globals.verbose)
 				warnx("log locally %s %s (ignored)",
 				      TypeNames[f->f_type], f->f_un.f_fname);
 			return;
@@ -1555,7 +1377,7 @@ void log_locally(struct filed *f, struct log_format *fmt, int flags)
 
 	f->f_time = now;
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("log locally %s %s", TypeNames[f->f_type], f->f_un.f_fname);
 
 	if (f->f_type == F_TTY || f->f_type == F_CONSOLE) {
@@ -1618,7 +1440,7 @@ again:
 
 void log_users(struct filed *f, struct log_format *fmt)
 {
-	if (verbose)
+	if (globals.verbose)
 		warnx("log to logged in users %s", TypeNames[f->f_type]);
 
 	f->f_time = now;
@@ -1828,12 +1650,12 @@ const char *cvthname(struct sockaddr_storage *f, unsigned int len)
 
 	if ((error = getnameinfo((struct sockaddr *) f, len,
 	                         hname, NI_MAXHOST, NULL, 0, NI_NAMEREQD))) {
-		if (verbose)
+		if (globals.verbose)
 			warnx("host name for your address (%s) unknown: %s",
 			      hname, gai_strerror(error));
 		if ((error = getnameinfo((struct sockaddr *) f, len,
 		                         hname, NI_MAXHOST, NULL, 0, NI_NUMERICHOST))) {
-			if (verbose)
+			if (globals.verbose)
 				warnx("malformed from address: %s", gai_strerror(error));
 			return "???";
 		}
@@ -1855,20 +1677,20 @@ const char *cvthname(struct sockaddr_storage *f, unsigned int len)
 			*p = '\0';
 			return (hname);
 		} else {
-			if (StripDomains) {
+			if (globals.strip_domains) {
 				count = 0;
-				while (StripDomains[count]) {
-					if (strcmp(p + 1, StripDomains[count]) == 0) {
+				while (globals.strip_domains[count]) {
+					if (strcmp(p + 1, globals.strip_domains[count]) == 0) {
 						*p = '\0';
 						return (hname);
 					}
 					count++;
 				}
 			}
-			if (LocalHosts) {
+			if (globals.local_hosts) {
 				count = 0;
-				while (LocalHosts[count]) {
-					if (!strcmp(hname, LocalHosts[count])) {
+				while (globals.local_hosts[count]) {
+					if (!strcmp(hname, globals.local_hosts[count])) {
 						*p = '\0';
 						return (hname);
 					}
@@ -1897,12 +1719,12 @@ void flush_dups(void)
 	struct sourceinfo source;
 	set_internal_sinfo(&source);
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("flush duplicate messages.");
 
 	for (struct filed *f = files; f; f = f->next) {
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
-			if (verbose)
+			if (globals.verbose)
 				warnx("flush %s: repeated %d times, %ld sec.",
 				      TypeNames[f->f_type], f->f_prevcount,
 				      repeatinterval[f->f_repeatcount]);
@@ -1937,7 +1759,7 @@ void logerror(const char *fmt, ...)
 	vsnprintf(buf + 9, sizeof(buf) - 9, fmt, ap);
 	va_end(ap);
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("%s", buf + 9);
 
 	if (!is_logger_initialized(&log_fmt)) {
@@ -1960,7 +1782,7 @@ void die(int sig)
 
 	if (sig) {
 		char buf[100];
-		if (verbose)
+		if (globals.verbose)
 			warnx("exiting on signal %d", sig);
 		snprintf(buf, sizeof(buf), "exiting on signal %d", sig);
 		errno = 0;
@@ -2004,11 +1826,11 @@ void init(void)
 	/*
 	 *  Close all open log files and free log descriptor array.
 	 */
-	if (verbose)
+	if (globals.verbose)
 		warnx("called init.");
 
 	if (files) {
-		if (verbose)
+		if (globals.verbose)
 			warnx("initializing log structures.");
 		free_files();
 	}
@@ -2019,7 +1841,7 @@ void init(void)
 	if ((p = strchr(LocalHostName, '.'))) {
 		*p++        = '\0';
 		LocalDomain = p;
-	} else if ((options & OPT_ACCEPT_REMOTE)) {
+	} else if ((globals.options & OPT_ACCEPT_REMOTE)) {
 		/*
 		 * It's not clearly defined whether gethostname()
 		 * should return the simple hostname or the fqdn. A
@@ -2048,7 +1870,7 @@ void init(void)
 		if (isupper(*p))
 			*p = tolower(*p);
 
-	if (parse_config_file(ConfFile) < 0) {
+	if (parse_config_file(globals.config_file) < 0) {
 		if (!(f = allocate_log()))
 			return;
 
@@ -2085,7 +1907,7 @@ void init(void)
 		}
 		if ((in->fd = create_unix_socket(in->name, UNIXAF_BIND)) < 0)
 			continue;
-		if (verbose)
+		if (globals.verbose)
 			warnx("opened UNIX socket `%s' (fd=%d).", in->name, in->fd);
 	}
 #endif
@@ -2095,10 +1917,10 @@ void init(void)
 		if (f->f_type == F_FORW || f->f_type == F_FORW_SUSP || f->f_type == F_FORW_UNKN)
 			Forwarding++;
 	}
-	if (Forwarding || (options & OPT_ACCEPT_REMOTE)) {
+	if (Forwarding || (globals.options & OPT_ACCEPT_REMOTE)) {
 		if (!InetInuse && create_inet_sockets() > 0) {
 			InetInuse = 1;
-			if (verbose)
+			if (globals.verbose)
 				warnx("opened syslog UDP port.");
 		}
 	} else {
@@ -2126,12 +1948,12 @@ void init(void)
 			continue;
 		}
 
-		if (verbose)
+		if (globals.verbose)
 			warnx("listening active file descriptor #%d (%s)", in->fd,
 					print_code_name(in->type, InputTypeNames));
 	}
 
-	if (verbose > 1) {
+	if (globals.verbose > 1) {
 		for (f = files; f; f = f->next) {
 			if (f->f_type != F_UNUSED) {
 				printf("%2d: ", lognum);
@@ -2175,12 +1997,12 @@ void init(void)
 		}
 	}
 
-	if ((options & OPT_ACCEPT_REMOTE))
+	if ((globals.options & OPT_ACCEPT_REMOTE))
 		printmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart (remote reception).", &source, 0);
 	else
 		printmsg(LOG_SYSLOG | LOG_INFO, "syslogd " VERSION ": restart.", &source, 0);
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("restarted.");
 }
 
@@ -2224,7 +2046,7 @@ void parse_config_line(const char *line, struct filed *f)
 #endif
 	char buf[MAXLINE];
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("parse_config_line(%s)", line);
 
 	errno = 0; /* keep strerror() stuff out of logerror messages */
@@ -2267,7 +2089,7 @@ void parse_config_line(const char *line, struct filed *f)
 
 		if (*ptr == '*') {
 			pri = TABLE_ALLPRI;
-			if (verbose)
+			if (globals.verbose)
 				warnx("symbolic name: %s ==> %d", ptr, pri);
 		} else {
 			pri = decode(ptr, bb_prioritynames);
@@ -2310,7 +2132,7 @@ void parse_config_line(const char *line, struct filed *f)
 	} else
 		syncfile = 1;
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("leading char in action: %c", *p);
 
 	switch (*p) {
@@ -2320,7 +2142,7 @@ void parse_config_line(const char *line, struct filed *f)
 			if (*q == '/') {
 				safe_strncpy(f->f_un.f_fname, q, sizeof(f->f_un.f_fname));
 
-				if (verbose)
+				if (globals.verbose)
 					warnx("forwarding unix domain socket: %s", p); /*ASP*/
 
 				f->f_type = F_UNIXAF;
@@ -2338,11 +2160,11 @@ void parse_config_line(const char *line, struct filed *f)
 #ifdef SYSLOG_INET
 			safe_strncpy(f->f_un.f_forw.f_hname, q, sizeof(f->f_un.f_forw.f_hname));
 
-			if (verbose)
+			if (globals.verbose)
 				warnx("forwarding host: %s", p); /*ASP*/
 
 			memset(&hints, 0, sizeof(hints));
-			hints.ai_family   = family;
+			hints.ai_family   = globals.family;
 			hints.ai_socktype = SOCK_DGRAM;
 			if (getaddrinfo(p, "syslog", &hints, &ai)) {
 				/*
@@ -2366,7 +2188,7 @@ void parse_config_line(const char *line, struct filed *f)
 		case '/':
 			safe_strncpy(f->f_un.f_fname, p, sizeof(f->f_un.f_fname));
 
-			if (verbose)
+			if (globals.verbose)
 				warnx("filename: %s", p); /*ASP*/
 
 			if (syncfile)
@@ -2395,13 +2217,13 @@ void parse_config_line(const char *line, struct filed *f)
 			break;
 
 		case '*':
-			if (verbose)
+			if (globals.verbose)
 				warnx("write-all");
 			f->f_type = F_WALL;
 			break;
 
 		default:
-			if (verbose)
+			if (globals.verbose)
 				warnx("users: %s", p); /* ASP */
 			for (i = 0; i < MAXUNAMES && *p; i++) {
 				for (q = p; *q && *q != ',';)
@@ -2427,7 +2249,7 @@ int parse_config_file(const char *filename)
 	char cbuf[BUFSIZ];
 	char *cline;
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("parse_config_file(%s)", filename);
 
 	if (!(fd = fopen(filename, "r"))) {
@@ -2500,19 +2322,19 @@ int decode(const char *name, const CODE *c)
 
 		for (; c->c_name; c++)
 			if (val == c->c_val) {
-				if (verbose)
+				if (globals.verbose)
 					warnx("symbolic name: %s", name);
 				return val;
 			}
 	} else {
 		for (; c->c_name; c++)
 			if (!strcasecmp(name, c->c_name)) {
-				if (verbose)
+				if (globals.verbose)
 					warnx("symbolic name: %s ==> %d", name, c->c_val);
 				return c->c_val;
 			}
 	}
-	if (verbose)
+	if (globals.verbose)
 		warnx("symbolic name: %s => not found", name);
 	return -1;
 }
@@ -2534,7 +2356,7 @@ struct filed *allocate_log(void)
 {
 	struct filed *new;
 
-	if (verbose)
+	if (globals.verbose)
 		warnx("allocating new log structure.");
 
 	new = calloc(1, sizeof(*new));
