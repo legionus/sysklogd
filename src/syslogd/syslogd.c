@@ -308,7 +308,7 @@ static char *chroot_dir  = NULL; /* user name to run server as */
 int main(int argc, char **argv);
 size_t safe_strncpy(char *dest, const char *src, size_t size) SYSKLOGD_NONNULL((1, 2));
 size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
-char *strnchr(const char *s, char c, size_t n) SYSKLOGD_NONNULL((1));
+char *strnchr(const char *s, char c, size_t n) SYSKLOGD_NONNULL((1)) SYSKLOGD_PURE();
 char **crunch_list(char *list);
 void usage(void) SYSKLOGD_NORETURN();
 void untty(void);
@@ -326,7 +326,7 @@ void log_users(struct filed *f, struct log_format *fmt)
     SYSKLOGD_NONNULL((1, 2));
 void log_locally(struct filed *f, struct log_format *fmt, int flags)
     SYSKLOGD_NONNULL((1, 2));
-void endtty(int);
+void endtty(int) SYSKLOGD_NORETURN();
 void wallmsg(register struct filed *f, struct log_format *log_fmt);
 const char *cvtaddr(struct sockaddr_storage *f, unsigned int len);
 const char *cvthname(struct sockaddr_storage *f, unsigned int len);
@@ -341,7 +341,7 @@ void event_dispatch(void) SYSKLOGD_NORETURN();
 void parse_config_line(const char *line, struct filed *f) SYSKLOGD_NONNULL((1, 2));
 int parse_config_file(const char *filename) SYSKLOGD_NONNULL((1));
 int decode(const char *name, const CODE *codetab) SYSKLOGD_NONNULL((1, 2));
-const char *print_code_name(int val, const CODE *codetab) SYSKLOGD_NONNULL((2));
+const char *print_code_name(int val, const CODE *codetab) SYSKLOGD_NONNULL((2)) SYSKLOGD_PURE();
 struct filed *allocate_log(void);
 int set_log_format_field(struct log_format *log_fmt, enum log_format_type t, const char *s, size_t n) SYSKLOGD_NONNULL((1));
 int parse_log_format(struct log_format *log_fmt, const char *s);

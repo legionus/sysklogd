@@ -78,7 +78,7 @@ execute()
 	"$prog" "$@" || exit 1
 }
 
-register aclocal    "${ACLOCAL:-aclocal}"       '' '' $OPT -I m4
+register aclocal    "${ACLOCAL:-aclocal}"       '' '' $OPT -I m4 --install
 register autoconf   "${AUTOCONF:-autoconf}"     '' '' $OPT -I m4
 register autoheader "${AUTOHEADER:-autoheader}" '' '' $OPT -I m4
 register automake   "${AUTOMAKE:-automake}"     '' '' --force-missing --add-missing --copy

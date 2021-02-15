@@ -45,9 +45,14 @@ AC_CHECK_FUNC([epoll_ctl],     [], [AC_MSG_ERROR([required function 'epoll_ctl' 
 AC_CHECK_FUNC([epoll_wait],    [], [AC_MSG_ERROR([required function 'epoll_wait' is missing.])])
 AC_CHECK_FUNC([dup2],          [], [AC_MSG_ERROR([required function 'dup2' is missing.])])
 
-CC_CHECK_CFLAGS_APPEND([\
-	-fomit-frame-pointer \
-	-fno-strength-reduce \
+AX_GCC_FUNC_ATTRIBUTE(format)
+AX_GCC_FUNC_ATTRIBUTE(nonnull)
+AX_GCC_FUNC_ATTRIBUTE(noreturn)
+AX_GCC_FUNC_ATTRIBUTE(pure)
+AX_GCC_FUNC_ATTRIBUTE(unused)
+
+AX_ADD_FORTIFY_SOURCE
+AX_APPEND_COMPILE_FLAGS([ \
 	-Wall \
 	-Wextra \
 	-Wstrict-prototypes \
@@ -58,6 +63,12 @@ CC_CHECK_CFLAGS_APPEND([\
 	-Wwrite-strings \
 	-Wcast-align \
 	-Wshadow \
+	-Wstringop-overflow=3 \
+	-Wsuggest-attribute=pure \
+	-Wsuggest-attribute=const \
+	-Wsuggest-attribute=noreturn \
+	-Wsuggest-attribute=malloc \
+	-Wsuggest-attribute=format \
 ])
 
 AC_ARG_ENABLE(werror,
@@ -65,7 +76,7 @@ AC_ARG_ENABLE(werror,
 	[use_werror=$enableval], [use_werror=no])
 
 if test "$use_werror" = yes; then
-	CC_CHECK_CFLAGS_APPEND([-Werror])
+	AX_APPEND_COMPILE_FLAGS([-Werror])
 fi
 
 AC_ARG_WITH(klog-start-delay,
@@ -122,6 +133,7 @@ AC_MSG_RESULT([
 	datadir:  ${datadir}
 
 	compiler: ${CC}
+	cppflags: ${CPPFLAGS}
 	cflags:   ${CFLAGS}
 
 	Create checksum chains:    ${use_checksums}
