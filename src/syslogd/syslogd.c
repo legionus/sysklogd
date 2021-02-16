@@ -358,7 +358,7 @@ int set_input(enum input_type type, const char *name, int fd)
 #ifdef SYSLOG_UNIXAF
 int create_unix_socket(const char *path, enum unixaf_option option)
 {
-	struct sockaddr_un sunx;
+	struct sockaddr_un sunx = { 0 };
 	int fd;
 
 	if (path[0] == '\0')
@@ -367,7 +367,6 @@ int create_unix_socket(const char *path, enum unixaf_option option)
 	if (option == UNIXAF_BIND)
 		unlink(path);
 
-	memset(&sunx, 0, sizeof(sunx));
 	sunx.sun_family = AF_UNIX;
 	safe_strncpy(sunx.sun_path, path, sizeof(sunx.sun_path));
 
@@ -381,7 +380,7 @@ int create_unix_socket(const char *path, enum unixaf_option option)
 		int passcred = 1;
 		socklen_t sl = sizeof(passcred);
 
-		if (bind(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family) + strlen(sunx.sun_path)) < 0) {
+		if (bind(fd, (struct sockaddr *) &sunx, SUN_LEN(&sunx)) < 0) {
 			logerror("cannot bind to %s: %m", path);
 			goto err;
 		}
@@ -393,7 +392,7 @@ int create_unix_socket(const char *path, enum unixaf_option option)
 
 		setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &passcred, sl);
 	} else if (option == UNIXAF_CONNECT) {
-		if (connect(fd, (struct sockaddr *) &sunx, sizeof(sunx.sun_family) + strlen(sunx.sun_path)) < 0) {
+		if (connect(fd, (struct sockaddr *) &sunx, SUN_LEN(&sunx)) < 0) {
 			logerror("cannot connect to %s: %m", path);
 			goto err;
 		}
