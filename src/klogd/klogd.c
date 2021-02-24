@@ -73,7 +73,7 @@ static enum LOGSRC { none,
 	             proc,
 	             kernel } logsrc;
 
-int debugging = 0;
+static int debugging = 0;
 
 static char *server_user = NULL;
 static char *chroot_dir  = NULL;
@@ -96,7 +96,7 @@ static void CloseLogSrc(void)
 	/* Shutdown the log sources. */
 	switch (logsrc) {
 		case kernel:
-			ksyslog(0, 0, 0);
+			ksyslog(0, NULL, 0);
 			Syslog(LOG_INFO, "Kernel logging (ksyslog) stopped.");
 			break;
 		case proc:
