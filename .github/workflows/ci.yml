@@ -22,10 +22,10 @@ jobs:
     - name: configure
       run: |
         ./autogen.sh
-        ./configure
+        env CC=gcc ./configure
     - name: build
       run: |
-        make CC=gcc
+        make V=1
     - name: check
       run: |
         make check
@@ -49,10 +49,10 @@ jobs:
     - name: configure
       run: |
         ./autogen.sh
-        ./configure
+        env CC=clang ./configure
     - name: build
       run: |
-        make CC=clang
+        make V=1
     - name: check
       run: |
         make check
@@ -76,10 +76,10 @@ jobs:
     - name: configure
       run: |
         ./autogen.sh
-        ./configure
+        env CC=gcc ./configure
     - name: build
       run: |
-        make CC=gcc LDFLAGS=-static
+        make V=1 LDFLAGS=-static
     - name: check
       run: |
         make check
@@ -106,7 +106,7 @@ jobs:
         ./configure
     - name: build
       run: |
-        make CC="musl-gcc -static -idirafter /usr/include/ -idirafter /usr/include/x86_64-linux-gnu/"
+        make V=1 CC="musl-gcc -static -idirafter /usr/include/ -idirafter /usr/include/x86_64-linux-gnu/"
     - name: check
       run: |
         make check
