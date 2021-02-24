@@ -1481,6 +1481,17 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from, int flags)
 
 	if (f->f_type != F_FORW_UNKN)
 		f->f_prevcount = 0;
+
+	/*
+	 * Address of stack memory associated with local variables (s_uid, s_gid
+	 * etc.) is still referred to by the global variable 'log_fmt' upon
+	 * returning to the caller. Let's clean them up.
+	 */
+	set_record_field(&log_fmt, LOG_FORMAT_UID, NULL, 0);
+	set_record_field(&log_fmt, LOG_FORMAT_GID, NULL, 0);
+	set_record_field(&log_fmt, LOG_FORMAT_PID, NULL, 0);
+	set_record_field(&log_fmt, LOG_FORMAT_PRI, NULL, 0);
+	set_record_field(&log_fmt, LOG_FORMAT_MSG, NULL, 0);
 }
 
 static jmp_buf ttybuf;
