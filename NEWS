@@ -1,3 +1,12 @@
+Version 1.8.0
+
+ . Alexey Gladkov <gladkov.alexey@gmail.com>
+   - syslogd: Incoming messages are processed without memory allocation.
+   - syslogd: Messages can be forwarded to unix domain socket.
+   - syslogd: Further source code cleanup.
+   - Added documentation for log_format.
+
+
 Version 1.7.0
 
  . Alexey Gladkov <gladkov.alexey@gmail.com>
@@ -11,6 +20,7 @@ Version 1.7.0
 
  . ArkanoiD <ark@owl.openwall.com>
    - syslogd: Enable unix socket peer credentials check.
+
 
 Version 1.6.0
 
@@ -46,6 +56,7 @@ Version 1.6.0
 
  . David Couture <glowplugrelayw0rks@gmail.com>
    - Correct continuation line problems on 64bit architecture
+
 
 Version 1.5.1
 
