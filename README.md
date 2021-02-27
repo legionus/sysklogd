@@ -11,7 +11,18 @@ This package is a collection of logging daemons.
   prioritizing and processing operating system messages. The klogd daemon can
   run as a client of syslogd or optionally as a standalone program.
 
-Original placement: https://www.infodrom.org/projects/sysklogd
+## Fork
+
+This fork, unlike other versions, uses modern features of the linux kernel such
+as `epoll(2)` or `signalfd(2)`.
+
+If you're looking for more traditional syskogd variants:
+
+* https://www.infodrom.org/projects/sysklogd (the project that was forked)
+* https://github.com/troglobit/sysklogd
+* https://github.com/openwall/Owl (The project includes a heavily modified version of [sysklogd](https://github.com/openwall/Owl/tree/main/packages/sysklogd))
+* https://github.com/openbsd/src ([syslogd](https://github.com/openbsd/src/blob/master/usr.sbin/syslogd/syslogd.c) is part of it);
+* https://github.com/guillemj/inetutils ([syslogd](https://github.com/guillemj/inetutils/blob/master/src/syslogd.c) is part of it).
 
 ## Requires
 
