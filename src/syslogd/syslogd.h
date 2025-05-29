@@ -37,6 +37,7 @@ enum option_flag {
 	OPT_NET_HOPS      = (1 << 3), /* can we bounce syslog messages through an
 	                               * intermediate host. */
 	OPT_ACCEPT_REMOTE = (1 << 4), /* receive messages that come via UDP */
+	OPT_BOOT_ID       = (1 << 5)  /* include boot ID in messages */
 };
 
 struct globals {
@@ -52,6 +53,7 @@ struct globals {
 	const char *devlog;
 	const char *config_file;
 	const char *funix_dir;
+	char boot_id[5];            /* Last 4 of the kernel boot ID */
 };
 
 enum log_format_type {

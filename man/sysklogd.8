@@ -115,6 +115,11 @@ within the syslogd.c source file.  An example for a chroot() daemon is
 described by the people from OpenBSD at
 <http://www.guides.sk/psionic/dns/>.
 .TP
+.BI "\-b"
+Include the last 4 characters of the kernel boot ID from
+.B /proc/sys/kernel/random/boot_id
+in the log messages.  This is useful for embedded systems.
+.TP
 .B "\-c"
 Disable the repeating line compression that normally suppresses the
 repeated lines and logs a message such as 'last message repeated 124

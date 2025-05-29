@@ -70,6 +70,8 @@
 
 #include <paths.h>
 
+int read_boot_id(void);
+
 static const char *PidFile  = _PATH_VARRUN "syslogd.pid";
 
 static struct globals globals = { 0 };
@@ -755,6 +757,14 @@ int main(int argc, char **argv)
 
 	if (parse_log_format(&remote_fmt, "<%P>%m") < 0)
 		exit(1);
+
+	if (globals.options & OPT_BOOT_ID) {
+		if (read_boot_id() < 0) {
+			if (globals.verbose)
+				warnx("unable to read boot ID, continuing without it.");
+			globals.boot_id[0] = '\0';
+		}
+	}
 
 	if ((globals.options & OPT_FORK)) {
 		pid_t pid;
@@ -1451,7 +1461,14 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from, int flags)
 			safe_strncat(msg, f->f_tag, sizeof(msg));
 			safe_strncat(msg, ": ", sizeof(msg));
 		}
-		safe_strncat(msg, f->f_prevline, sizeof(msg));
+		/* Add boot_id prefix if enabled */
+        if ((globals.options & OPT_BOOT_ID) && globals.boot_id[0]) {
+            char prefixed_msg[MAXLINE + sizeof("[1234]")];
+            snprintf(prefixed_msg, sizeof(prefixed_msg), "[%s] %s", globals.boot_id, f->f_prevline);
+            safe_strncat(msg, prefixed_msg, sizeof(msg));
+        } else {
+            safe_strncat(msg, f->f_prevline, sizeof(msg));
+        }
 	} else {
 		snprintf(msg, sizeof(msg), "last message repeated %d times", f->f_prevcount);
 	}
@@ -1676,6 +1693,47 @@ const char *cvthname(struct sockaddr_storage *f, unsigned int len)
 	}
 
 	return (hname);
+}
+
+int read_boot_id(void)
+{
+    FILE *fp;
+    char boot_id[sizeof("XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX")]; /* UUID is 36 chars + null terminator */
+
+    if (!(globals.options & OPT_BOOT_ID))
+        return 0;
+
+    fp = fopen("/proc/sys/kernel/random/boot_id", "r");
+    if (!fp) {
+        logerror("cannot open /proc/sys/kernel/random/boot_id: %m");
+        return -1;
+    }
+
+    if (!fgets(boot_id, sizeof(boot_id), fp)) {
+        logerror("cannot read boot_id: %m");
+        fclose(fp);
+        return -1;
+    }
+
+    fclose(fp);
+
+    /* Remove newline if present */
+    size_t len = strlen(boot_id);
+    if (len > 0 && boot_id[len - 1] == '\n')
+        boot_id[len - 1] = '\0';
+
+    /* Get last 4 characters */
+    len = strlen(boot_id);
+    if (len >= 4) {
+        safe_strncpy(globals.boot_id, boot_id + len - 4, sizeof(boot_id));
+        if (globals.verbose)
+            warnx("boot_id: %s, suffix: %s", boot_id, globals.boot_id);
+	} else {
+		logerror("boot_id too short: %s", boot_id);
+		return -1;
+	}
+
+	return 0;
 }
 
 void set_internal_sinfo(struct sourceinfo *source)

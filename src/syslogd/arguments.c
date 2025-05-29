@@ -125,7 +125,7 @@ void parse_arguments(int argc, char **argv, struct globals *g)
 	g->family = PF_INET; /* protocol family (IPv4 only) */
 #endif
 
-	while ((c = getopt(argc, argv, "46Aa:cdhf:i:j:l:m:np:P:rs:u:v")) != EOF) {
+	while ((c = getopt(argc, argv, "46Aa:bcdhf:i:j:l:m:np:P:rs:u:v")) != EOF) {
 		switch (c) {
 			case '4':
 				g->family = PF_INET;
@@ -140,6 +140,9 @@ void parse_arguments(int argc, char **argv, struct globals *g)
 				break;
 			case 'a':
 				set_input(INPUT_UNIX, optarg, -1);
+				break;
+			case 'b':
+				g->options |= OPT_BOOT_ID;
 				break;
 			case 'c': /* don't compress repeated messages */
 				g->options &= ~OPT_COMPRESS;
