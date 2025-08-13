@@ -39,6 +39,9 @@ enum option_flag {
 	OPT_ACCEPT_REMOTE = (1 << 4), /* receive messages that come via UDP */
 };
 
+#define PROC_BOOT_ID "/proc/sys/kernel/random/boot_id"
+#define UUID_TEMPLATE "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+
 struct globals {
 	int family;
 	int verbose;
@@ -49,6 +52,7 @@ struct globals {
 	unsigned int mark_interval; /* interval between marks in seconds */
 	char **strip_domains;       /* these domains may be stripped before writing logs */
 	char **local_hosts;         /* these hosts are logged with their hostname */
+	char boot_id[sizeof(UUID_TEMPLATE)];
 	const char *devlog;
 	const char *config_file;
 	const char *funix_dir;
@@ -59,6 +63,7 @@ enum log_format_type {
 	LOG_FORMAT_BOL,
 	LOG_FORMAT_HASH,
 	LOG_FORMAT_TIME,
+	LOG_FORMAT_BOOTID,
 	LOG_FORMAT_HOST,
 	LOG_FORMAT_PID,
 	LOG_FORMAT_UID,

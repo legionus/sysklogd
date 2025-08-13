@@ -128,6 +128,9 @@ int parse_log_format(struct log_format *fmt, const char *str)
 
 		if (special) {
 			switch (*ptr) {
+				case 'b':
+					f_type = LOG_FORMAT_BOOTID;
+					break;
 				case 't':
 					f_type = LOG_FORMAT_TIME;
 					break;

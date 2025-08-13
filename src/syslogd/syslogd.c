@@ -248,6 +248,7 @@ int main(int argc, char **argv);
 size_t safe_strncpy(char *dest, const char *src, size_t size) SYSKLOGD_NONNULL((1, 2));
 size_t safe_strncat(char *d, const char *s, size_t n) SYSKLOGD_NONNULL((1, 2));
 char *strnchr(const char *s, char c, size_t n) SYSKLOGD_NONNULL((1)) SYSKLOGD_PURE();
+int read_boot_id(void);
 void untty(void);
 void printline(const struct sourceinfo *const, char *msg, size_t len);
 void printmsg(unsigned int pri, const char *msg, const struct sourceinfo *const, int flags);
@@ -323,6 +324,44 @@ char *strnchr(const char *s, char c, size_t n)
 		if (*s == c)
 			return (char *) s;
 	return NULL;
+}
+
+int read_boot_id(void)
+{
+	int fd, ret;
+	ssize_t len;
+
+	globals.boot_id[0] = '\0';
+
+	if (access(PROC_BOOT_ID, R_OK) != 0)
+		return 0;
+
+	ret = -1;
+
+	if ((fd = open(PROC_BOOT_ID, O_RDONLY)) < 0) {
+		logerror("cannot open %s: %m", PROC_BOOT_ID);
+		return ret;
+	}
+
+	errno = 0;
+	len = read(fd, globals.boot_id, sizeof(globals.boot_id));
+
+	if (len < 0) {
+		logerror("cannot read boot_id: %m");
+		goto finish;
+	}
+	if (len == 0) {
+		logerror("empty boot_id");
+		goto finish;
+	}
+
+	if (globals.boot_id[len - 1] == '\n')
+		globals.boot_id[len - 1] = '\0';
+
+	ret = 0;
+finish:
+	close(fd);
+	return ret;
 }
 
 int set_input(enum input_type type, const char *name, int fd)
@@ -749,6 +788,10 @@ int main(int argc, char **argv)
 
 	if (globals.funix_dir && *globals.funix_dir)
 		add_funix_dir(globals.funix_dir);
+
+	if (read_boot_id() < 0)
+		err(1, "unable to read boot_id");
+	exit(0);
 
 	if (parse_log_format(&log_fmt, "%t %h (uid=%u) %m") < 0)
 		exit(1);
@@ -1428,6 +1471,7 @@ void fprintlog(struct filed *f, const struct sourceinfo *const from, int flags)
 	 */
 	ctime_r(&f->f_lasttime, f_lasttime);
 
+	set_record_field(&log_fmt, LOG_FORMAT_BOOTID, globals.boot_id, -1);
 	set_record_field(&log_fmt, LOG_FORMAT_TIME, f_lasttime + 4, 15);
 	set_record_field(&log_fmt, LOG_FORMAT_HOST, f->f_prevhost, -1);
 	set_record_field(&log_fmt, LOG_FORMAT_HASH, f->f_prevhash, -1);
